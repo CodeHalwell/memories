@@ -15,11 +15,12 @@ public sealed class TextEmbedder : ITextEmbedder
     private readonly string _baseUrl;
     private readonly string _model;
     private readonly ILogger<TextEmbedder>? _logger;
-    private int? _dimension;
+    private readonly int _dimension;
 
     public TextEmbedder(
         string? baseUrl = null,
         string? model = null,
+        int? dimension = null,
         HttpClient? client = null,
         ILogger<TextEmbedder>? logger = null)
     {
@@ -27,22 +28,10 @@ public sealed class TextEmbedder : ITextEmbedder
         _model = model ?? new MemoryConfig().TextEmbeddingModel;
         _client = client ?? new HttpClient();
         _logger = logger;
+        _dimension = dimension ?? 384;
     }
 
-    public int Dimension
-    {
-        get
-        {
-            if (_dimension is null)
-            {
-                // Infer dimension from a dummy embedding
-                var task = EmbedAsync("test");
-                task.Wait();
-                _dimension = task.Result.Count;
-            }
-            return _dimension.Value;
-        }
-    }
+    public int Dimension => _dimension;
 
     public async Task<List<double>> EmbedAsync(string text)
     {
@@ -54,6 +43,7 @@ public sealed class TextEmbedder : ITextEmbedder
 
         var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
         var resp = await _client.PostAsync($"{_baseUrl}/v1/embeddings", content);
+        resp.EnsureSuccessStatusCode();
         var json = await resp.Content.ReadAsStringAsync();
 
         using var doc = JsonDocument.Parse(json);
@@ -64,7 +54,6 @@ public sealed class TextEmbedder : ITextEmbedder
             .Select(e => e.GetDouble())
             .ToList();
 
-        _dimension ??= embedding.Count;
         return embedding;
     }
 

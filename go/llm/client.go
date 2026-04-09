@@ -13,6 +13,10 @@ import (
 	"time"
 )
 
+func normalizeBaseURL(baseURL string) string {
+	return strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
+}
+
 // Client calls an OpenAI-compatible chat completion API.
 type Client struct {
 	BaseURL     string
@@ -26,7 +30,7 @@ type Client struct {
 // NewClient creates an LLM Client.
 func NewClient(baseURL, apiKey, model string, temperature float64) *Client {
 	return &Client{
-		BaseURL:     baseURL,
+		BaseURL:     normalizeBaseURL(baseURL),
 		APIKey:      apiKey,
 		Model:       model,
 		Temperature: temperature,
@@ -90,7 +94,7 @@ func (c *Client) Complete(ctx context.Context, prompt string, system *string, mo
 			return "", fmt.Errorf("marshalling request: %w", err)
 		}
 
-		req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/chat/completions", bytes.NewReader(data))
+		req, err := http.NewRequestWithContext(ctx, "POST", c.BaseURL+"/v1/chat/completions", bytes.NewReader(data))
 		if err != nil {
 			return "", fmt.Errorf("creating request: %w", err)
 		}

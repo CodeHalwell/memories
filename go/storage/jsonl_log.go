@@ -2,6 +2,7 @@
 package storage
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -96,16 +97,18 @@ func (l *JSONLLogger) ReadEntry(filePath string, byteOffset int64) (agentmemory.
 // IterSession yields all entries for a session in order via a callback.
 func (l *JSONLLogger) IterSession(sessionID string, fn func(agentmemory.RawLogEntry) bool) error {
 	path := l.sessionPath(sessionID)
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return fmt.Errorf("reading session file: %w", err)
+		return fmt.Errorf("opening session file: %w", err)
 	}
+	defer file.Close()
 
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
 			continue
 		}
@@ -116,6 +119,9 @@ func (l *JSONLLogger) IterSession(sessionID string, fn func(agentmemory.RawLogEn
 		if !fn(entry) {
 			break
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("scanning session file: %w", err)
 	}
 	return nil
 }

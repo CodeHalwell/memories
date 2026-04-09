@@ -148,20 +148,39 @@ impl LlmClient {
         let text = self.complete(prompt, system, model, temperature).await?;
 
         // Strip markdown code fences if present
-        let cleaned = text.trim();
-        let cleaned = if cleaned.starts_with("```") {
-            let lines: Vec<&str> = cleaned.split('\n').collect();
-            let inner: Vec<&str> = lines[1..]
-                .iter()
-                .filter(|l| !l.trim().starts_with("```"))
-                .copied()
-                .collect();
-            inner.join("\n")
-        } else {
-            cleaned.to_string()
-        };
+        let cleaned = strip_markdown_code_fences(&text);
 
         let value: Value = serde_json::from_str(&cleaned)?;
         Ok(value)
+    }
+}
+
+fn strip_markdown_code_fences(text: &str) -> String {
+    let cleaned = text.trim();
+    if !cleaned.starts_with("```") {
+        return cleaned.to_string();
+    }
+
+    let mut lines = cleaned.lines();
+    let Some(first_line) = lines.next() else {
+        return cleaned.to_string();
+    };
+
+    if !first_line.trim().starts_with("```") {
+        return cleaned.to_string();
+    }
+
+    let mut body = Vec::new();
+    for line in lines {
+        if line.trim().starts_with("```") {
+            break;
+        }
+        body.push(line);
+    }
+
+    if body.is_empty() {
+        cleaned.to_string()
+    } else {
+        body.join("\n")
     }
 }

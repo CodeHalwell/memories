@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -141,7 +142,9 @@ func (r *RetrievalEngine) Retrieve(ctx context.Context, query string, sessionID 
 	}
 
 	// Sort by score descending
-	sortScoredMems(memories)
+	sort.Slice(memories, func(i, j int) bool {
+		return memories[i].Score > memories[j].Score
+	})
 
 	// Log access and update decay for returned memories
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -287,18 +290,4 @@ func dedup(items []idScore, limit int) []idScore {
 		}
 	}
 	return result
-}
-
-func sortScoredMems(items []struct {
-	Mem   agentmemory.Memory
-	Score float64
-}) {
-	// Use a simple sort
-	for i := 0; i < len(items); i++ {
-		for j := i + 1; j < len(items); j++ {
-			if items[j].Score > items[i].Score {
-				items[i], items[j] = items[j], items[i]
-			}
-		}
-	}
 }

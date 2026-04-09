@@ -15,11 +15,12 @@ public sealed class VisualEmbedder : IVisualEmbedder
     private readonly string _baseUrl;
     private readonly string _model;
     private readonly ILogger<VisualEmbedder>? _logger;
-    private int? _dimension;
+    private readonly int _dimension;
 
     public VisualEmbedder(
         string? baseUrl = null,
         string? model = null,
+        int? dimension = null,
         HttpClient? client = null,
         ILogger<VisualEmbedder>? logger = null)
     {
@@ -27,21 +28,10 @@ public sealed class VisualEmbedder : IVisualEmbedder
         _model = model ?? new MemoryConfig().ClipModel;
         _client = client ?? new HttpClient();
         _logger = logger;
+        _dimension = dimension ?? 512;
     }
 
-    public int Dimension
-    {
-        get
-        {
-            if (_dimension is null)
-            {
-                var task = EmbedAsync("test");
-                task.Wait();
-                _dimension = task.Result.Count;
-            }
-            return _dimension.Value;
-        }
-    }
+    public int Dimension => _dimension;
 
     public async Task<List<double>> EmbedAsync(string text)
     {
@@ -53,6 +43,7 @@ public sealed class VisualEmbedder : IVisualEmbedder
 
         var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
         var resp = await _client.PostAsync($"{_baseUrl}/v1/embeddings", content);
+        resp.EnsureSuccessStatusCode();
         var json = await resp.Content.ReadAsStringAsync();
 
         using var doc = JsonDocument.Parse(json);
@@ -63,7 +54,6 @@ public sealed class VisualEmbedder : IVisualEmbedder
             .Select(e => e.GetDouble())
             .ToList();
 
-        _dimension ??= embedding.Count;
         return embedding;
     }
 

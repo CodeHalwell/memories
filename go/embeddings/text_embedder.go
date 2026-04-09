@@ -8,7 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
+	"time"
 )
+
+func normalizeEmbeddingBaseURL(baseURL string) string {
+	return strings.TrimSuffix(strings.TrimRight(baseURL, "/"), "/v1")
+}
 
 // TextEmbedder generates text embeddings via an HTTP embedding API.
 type TextEmbedder struct {
@@ -22,11 +28,11 @@ type TextEmbedder struct {
 // NewTextEmbedder creates a TextEmbedder targeting the given API.
 func NewTextEmbedder(baseURL, apiKey, model string, dimension int) *TextEmbedder {
 	return &TextEmbedder{
-		BaseURL:   baseURL,
+		BaseURL:   normalizeEmbeddingBaseURL(baseURL),
 		APIKey:    apiKey,
 		Model:     model,
 		Dimension: dimension,
-		client:    &http.Client{},
+		client:    &http.Client{Timeout: 120 * time.Second},
 	}
 }
 
@@ -53,7 +59,7 @@ func (t *TextEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]floa
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", t.BaseURL+"/embeddings", bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, "POST", t.BaseURL+"/v1/embeddings", bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}

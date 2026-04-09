@@ -16,10 +16,12 @@ public sealed class VectorStore : IDisposable
     private readonly HttpClient _client;
     private readonly string _baseUrl;
     private readonly ILogger<VectorStore>? _logger;
+    private readonly bool _ownsClient;
 
     public VectorStore(string? baseUrl = null, HttpClient? client = null, ILogger<VectorStore>? logger = null)
     {
         _baseUrl = (baseUrl ?? "http://localhost:6333").TrimEnd('/');
+        _ownsClient = client is null;
         _client = client ?? new HttpClient();
         _logger = logger;
     }
@@ -32,7 +34,8 @@ public sealed class VectorStore : IDisposable
 
     public void Dispose()
     {
-        _client.Dispose();
+        if (_ownsClient)
+            _client.Dispose();
     }
 
     private async Task EnsureCollectionAsync(string name, int dim)

@@ -15,9 +15,11 @@ public sealed class LlmClient : ILlmClient
     private readonly string _baseUrl;
     private readonly MemoryConfig _config;
     private readonly ILogger<LlmClient>? _logger;
+    private readonly string? _apiKey;
 
     public LlmClient(
         string? baseUrl = null,
+        string? apiKey = null,
         MemoryConfig? config = null,
         HttpClient? client = null,
         ILogger<LlmClient>? logger = null)
@@ -26,6 +28,7 @@ public sealed class LlmClient : ILlmClient
         _config = config ?? new MemoryConfig();
         _client = client ?? new HttpClient();
         _logger = logger;
+        _apiKey = apiKey ?? _config.ApiKey;
     }
 
     public async Task<string> CompleteAsync(
@@ -54,8 +57,13 @@ public sealed class LlmClient : ILlmClient
                     temperature,
                 });
 
-                var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
-                var resp = await _client.PostAsync($"{_baseUrl}/v1/chat/completions", content);
+                using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/v1/chat/completions")
+                {
+                    Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json")
+                };
+                if (!string.IsNullOrWhiteSpace(_apiKey))
+                    request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
+                var resp = await _client.SendAsync(request);
                 resp.EnsureSuccessStatusCode();
 
                 var json = await resp.Content.ReadAsStringAsync();
@@ -73,6 +81,7 @@ public sealed class LlmClient : ILlmClient
                     throw;
 
                 _logger?.LogWarning(
+                    ex,
                     "LLM call failed (attempt {Attempt}/{Max}), retrying...",
                     attempt + 1, maxRetries);
 

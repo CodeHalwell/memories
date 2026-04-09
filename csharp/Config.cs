@@ -19,6 +19,7 @@ public sealed class MemoryConfig
     public string PolicyDataDir => Path.Combine(DataDir, "policy_data");
 
     // ── LLM ──
+    public string? ApiKey { get; set; }
     public string LlmModel { get; set; } = "claude-sonnet-4-6";
     public double LlmTemperature { get; set; } = 0.2;
 

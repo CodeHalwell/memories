@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math/rand"
 	"strings"
@@ -167,9 +168,4 @@ func CommitDiscoveries(
 
 	log.Printf("Dream exploration: committed %d/%d edges", committed, len(discoveries))
 	return committed, nil
-}
-
-func fmt_Sprintf(format string, args ...interface{}) string {
-	// stub to avoid import cycle — replaced by actual fmt usage above
-	return ""
 }

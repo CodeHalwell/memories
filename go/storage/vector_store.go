@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -29,7 +30,7 @@ type VectorStore struct {
 func NewVectorStore(baseURL string) *VectorStore {
 	return &VectorStore{
 		baseURL:    baseURL,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: 120 * time.Second},
 	}
 }
 
@@ -156,6 +157,11 @@ func (v *VectorStore) SearchText(ctx context.Context, queryVector []float64, lim
 		return nil, err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("text search failed: %s", string(data))
+	}
 
 	var result struct {
 		Result []struct {

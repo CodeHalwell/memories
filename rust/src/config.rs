@@ -32,6 +32,7 @@ pub fn default_policy_data_dir() -> PathBuf {
 
 /// Prompt configuration mapping.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PromptsConfig {
     pub scene_description: String,
     pub save_decision: String,
@@ -56,6 +57,7 @@ impl Default for PromptsConfig {
 
 /// Central configuration for the memory system.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MemoryConfig {
     // LLM
     pub llm_model: String,

@@ -6,6 +6,7 @@
 
 use log::debug;
 use reqwest::Client;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -108,8 +109,12 @@ impl VectorStore {
 
         // Check if collection exists
         let resp = self.client.get(&url).send().await?;
-        if resp.status().is_success() {
-            return Ok(());
+        match resp.status() {
+            StatusCode::OK => return Ok(()),
+            StatusCode::NOT_FOUND => {}
+            _ => {
+                resp.error_for_status()?;
+            }
         }
 
         // Create collection
@@ -123,7 +128,8 @@ impl VectorStore {
             .put(&url)
             .json(&body)
             .send()
-            .await?;
+            .await?
+            .error_for_status()?;
         Ok(())
     }
 
@@ -159,7 +165,12 @@ impl VectorStore {
         };
 
         let url = format!("{}/collections/{TEXT_COLLECTION}/points", self.base_url);
-        self.client.put(&url).json(&body).send().await?;
+        self.client
+            .put(&url)
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?;
         Ok(point_id)
     }
 
@@ -184,7 +195,15 @@ impl VectorStore {
         };
 
         let url = format!("{}/collections/{TEXT_COLLECTION}/points/search", self.base_url);
-        let resp: SearchResponse = self.client.post(&url).json(&body).send().await?.json().await?;
+        let resp: SearchResponse = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
 
         Ok(resp
             .result
@@ -242,7 +261,12 @@ impl VectorStore {
         };
 
         let url = format!("{}/collections/{VISUAL_COLLECTION}/points", self.base_url);
-        self.client.put(&url).json(&body).send().await?;
+        self.client
+            .put(&url)
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?;
         Ok(point_id)
     }
 
@@ -263,7 +287,15 @@ impl VectorStore {
             "{}/collections/{VISUAL_COLLECTION}/points/search",
             self.base_url
         );
-        let resp: SearchResponse = self.client.post(&url).json(&body).send().await?.json().await?;
+        let resp: SearchResponse = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
 
         Ok(resp
             .result
@@ -305,6 +337,7 @@ impl VectorStore {
             .json(&body)
             .send()
             .await?
+            .error_for_status()?
             .json()
             .await?;
 
@@ -341,7 +374,12 @@ impl VectorStore {
             }),
         };
 
-        self.client.post(&url).json(&body).send().await?;
+        self.client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?;
         debug!("Deleted points for memory_id={memory_id} from {collection}");
         Ok(())
     }

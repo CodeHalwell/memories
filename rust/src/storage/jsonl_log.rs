@@ -14,10 +14,10 @@ pub struct JSONLLogger {
 }
 
 impl JSONLLogger {
-    pub fn new(log_dir: Option<PathBuf>) -> Self {
+    pub fn new(log_dir: Option<PathBuf>) -> Result<Self, std::io::Error> {
         let dir = log_dir.unwrap_or_else(default_log_dir);
-        std::fs::create_dir_all(&dir).ok();
-        Self { log_dir: dir }
+        std::fs::create_dir_all(&dir)?;
+        Ok(Self { log_dir: dir })
     }
 
     fn session_path(&self, session_id: &str) -> PathBuf {
