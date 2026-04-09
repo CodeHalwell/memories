@@ -366,6 +366,19 @@ impl SQLiteStore {
         Ok(memories)
     }
 
+    /// Find the memory ID associated with a raw log entry.
+    pub async fn find_memory_id_by_raw_log_id(
+        &self,
+        raw_log_id: &str,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let row: Option<SqliteRow> =
+            sqlx::query("SELECT id FROM memories WHERE raw_log_id = ?")
+                .bind(raw_log_id)
+                .fetch_optional(self.pool())
+                .await?;
+        Ok(row.map(|r| r.get("id")))
+    }
+
     pub async fn count_memories(&self, tier: Option<&str>) -> Result<i64, sqlx::Error> {
         let row: SqliteRow = if let Some(tier) = tier {
             sqlx::query("SELECT COUNT(*) as cnt FROM memories WHERE tier = ?")

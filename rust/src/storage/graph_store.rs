@@ -223,6 +223,9 @@ impl GraphStore {
         max_depth: i32,
         min_weight: f64,
     ) -> Result<Vec<RelatedMemory>, sqlx::Error> {
+        // max_depth is an i32 parameter, safe to embed as a literal since sqlx
+        // does not support binding integers in recursive CTE depth comparisons.
+        let max_depth = max_depth.max(0);
         let sql = format!(
             "WITH RECURSIVE traversal(id, depth) AS ( \
                  SELECT to_id, 1 FROM relates_to_edges WHERE from_id = ? AND weight >= ? \
@@ -393,6 +396,9 @@ impl GraphStore {
         to_id: &str,
         max_hops: i32,
     ) -> Result<bool, sqlx::Error> {
+        // max_hops is an i32 parameter, safe to embed as a literal since sqlx
+        // does not support binding integers in recursive CTE depth comparisons.
+        let max_hops = max_hops.max(0);
         let sql = format!(
             "WITH RECURSIVE reach(id, depth) AS ( \
                  SELECT to_id, 1 FROM relates_to_edges WHERE from_id = ? \

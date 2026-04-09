@@ -324,8 +324,8 @@ impl<'a> RetrievalEngine<'a> {
         for (raw_id, count) in sorted_hits.into_iter().take(limit) {
             if self.sqlite.get_raw_log_ref(&raw_id).await?.is_some() {
                 // Find memory by raw_log_id
-                if let Ok(Some(mem)) = self.sqlite.get_memory(&raw_id).await {
-                    results.push((mem.id, count as f64));
+                if let Ok(Some(mem_id)) = self.sqlite.find_memory_id_by_raw_log_id(&raw_id).await {
+                    results.push((mem_id, count as f64));
                 }
             }
         }

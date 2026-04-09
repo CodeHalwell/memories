@@ -348,7 +348,12 @@ impl VectorStore {
 }
 
 /// Compute cosine similarity between two vectors.
+///
+/// Returns 0.0 if vectors are empty or have different lengths.
 pub fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
+    if a.len() != b.len() || a.is_empty() {
+        return 0.0;
+    }
     let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let norm_a: f64 = a.iter().map(|x| x * x).sum::<f64>().sqrt();
     let norm_b: f64 = b.iter().map(|x| x * x).sum::<f64>().sqrt();
