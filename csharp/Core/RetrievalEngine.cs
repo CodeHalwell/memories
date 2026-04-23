@@ -74,21 +74,20 @@ public sealed class RetrievalEngine
             }
         }
 
-        // Run layers concurrently
-        var grepTask = GrepLayerAsync(query, topK.Value);
-        var keywordTask = KeywordLayerAsync(query, topK.Value);
-        var semanticTask = SemanticLayerAsync(query, topK.Value);
+        // Run layers concurrently, tolerating individual layer failures so a
+        // degraded backend (e.g. vector store down) doesn't fail the whole call.
+        var grepTask = RunLayerAsync("grep", () => GrepLayerAsync(query, topK.Value));
+        var keywordTask = RunLayerAsync("keyword", () => KeywordLayerAsync(query, topK.Value));
+        var semanticTask = RunLayerAsync("semantic", () => SemanticLayerAsync(query, topK.Value));
 
         var tasks = new List<Task<List<(string MemoryId, double Score)>>>
         {
             grepTask, keywordTask, semanticTask
         };
 
-        Task<List<(string MemoryId, double Score)>>? visualTask = null;
         if (enableVisual && _visualEmbedder is not null)
         {
-            visualTask = VisualLayerAsync(query, topK.Value);
-            tasks.Add(visualTask);
+            tasks.Add(RunLayerAsync("visual", () => VisualLayerAsync(query, topK.Value)));
         }
 
         var results = await Task.WhenAll(tasks);
@@ -215,6 +214,21 @@ public sealed class RetrievalEngine
     }
 
     // ── Layer implementations ──
+
+    private async Task<List<(string MemoryId, double Score)>> RunLayerAsync(
+        string layerName,
+        Func<Task<List<(string MemoryId, double Score)>>> layer)
+    {
+        try
+        {
+            return await layer();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Retrieval layer '{Layer}' failed, returning empty results", layerName);
+            return [];
+        }
+    }
 
     private async Task<List<(string MemoryId, double Score)>> GrepLayerAsync(string query, int limit)
     {

@@ -233,8 +233,13 @@ public sealed class VectorStore : IDisposable
 
     private static double CosineSimilarity(double[] a, double[] b)
     {
+        // Mismatched dimensions indicate corrupt data or mixed embedding models;
+        // returning 0 prevents misleading similarity scores from driving graph edges.
+        if (a.Length != b.Length || a.Length == 0)
+            return 0.0;
+
         double dot = 0, normA = 0, normB = 0;
-        for (var i = 0; i < a.Length && i < b.Length; i++)
+        for (var i = 0; i < a.Length; i++)
         {
             dot += a[i] * b[i];
             normA += a[i] * a[i];
