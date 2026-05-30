@@ -8,16 +8,23 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-
-import kuzu
+from typing import TYPE_CHECKING
 
 from agent_memory.config import GRAPH_DIR
+
+if TYPE_CHECKING:
+    import kuzu
 
 logger = logging.getLogger(__name__)
 
 
 class GraphStore:
-    """Kuzu-backed graph for memory relationships."""
+    """Kuzu-backed graph for memory relationships.
+
+    The ``kuzu`` import is deferred to ``initialize()`` so this module can be
+    imported on profiles without the ``graph`` extra installed (the graph layer
+    is optional on the lite/edge profile).
+    """
 
     def __init__(self, graph_dir: Path | None = None) -> None:
         self.graph_dir = graph_dir or GRAPH_DIR
@@ -25,6 +32,13 @@ class GraphStore:
         self._conn: kuzu.Connection | None = None
 
     def initialize(self) -> None:
+        try:
+            import kuzu
+        except ImportError as exc:  # pragma: no cover - dependency guard
+            raise ImportError(
+                "GraphStore requires the 'graph' extra. "
+                "Install with: pip install agent-memory[graph]"
+            ) from exc
         # Kuzu creates the database directory itself; only ensure the parent exists
         self.graph_dir.parent.mkdir(parents=True, exist_ok=True)
         self._db = kuzu.Database(str(self.graph_dir))

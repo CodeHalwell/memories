@@ -10,18 +10,12 @@ from __future__ import annotations
 import logging
 import uuid
 from pathlib import Path
-
-from qdrant_client import QdrantClient
-from qdrant_client.models import (
-    Distance,
-    FieldCondition,
-    Filter,
-    MatchValue,
-    PointStruct,
-    VectorParams,
-)
+from typing import TYPE_CHECKING
 
 from agent_memory.config import VECTOR_DIR
+
+if TYPE_CHECKING:
+    from qdrant_client import QdrantClient
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +24,12 @@ VISUAL_COLLECTION = "memory_visual"
 
 
 class VectorStore:
-    """Qdrant-backed vector store for memory embeddings."""
+    """Qdrant-backed vector store for memory embeddings.
+
+    ``qdrant_client`` is imported lazily so this module is importable without
+    the ``vectors`` extra. Profiles that retrieve only via grep/keyword (e.g.
+    the lite/edge profile) need not install Qdrant.
+    """
 
     def __init__(self, vector_dir: Path | None = None) -> None:
         self.vector_dir = vector_dir or VECTOR_DIR
@@ -38,6 +37,13 @@ class VectorStore:
 
     def initialize(self, text_dim: int = 384, visual_dim: int = 512) -> None:
         """Initialize Qdrant in embedded mode and ensure collections exist."""
+        try:
+            from qdrant_client import QdrantClient
+        except ImportError as exc:  # pragma: no cover - dependency guard
+            raise ImportError(
+                "VectorStore requires the 'vectors' extra. "
+                "Install with: pip install agent-memory[vectors]"
+            ) from exc
         self.vector_dir.mkdir(parents=True, exist_ok=True)
         self._client = QdrantClient(path=str(self.vector_dir))
         self._ensure_collection(TEXT_COLLECTION, text_dim)
@@ -54,6 +60,8 @@ class VectorStore:
         return self._client
 
     def _ensure_collection(self, name: str, dim: int) -> None:
+        from qdrant_client.models import Distance, VectorParams
+
         collections = [c.name for c in self.client.get_collections().collections]
         if name not in collections:
             self.client.create_collection(
@@ -69,6 +77,8 @@ class VectorStore:
         session_id: str = "", created_at: str = "",
     ) -> str:
         """Insert or update a text embedding. Returns the point ID."""
+        from qdrant_client.models import PointStruct
+
         point_id = str(uuid.uuid4())
         self.client.upsert(
             collection_name=TEXT_COLLECTION,
@@ -97,6 +107,8 @@ class VectorStore:
 
         Returns list of dicts: {memory_id, score, tier, valence, arousal}.
         """
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
         search_filter = None
         if tier_filter:
             search_filter = Filter(
@@ -127,6 +139,8 @@ class VectorStore:
         session_id: str = "", created_at: str = "",
     ) -> str:
         """Insert or update a visual (CLIP) embedding. Returns the point ID."""
+        from qdrant_client.models import PointStruct
+
         point_id = str(uuid.uuid4())
         self.client.upsert(
             collection_name=VISUAL_COLLECTION,
@@ -186,6 +200,8 @@ class VectorStore:
 
     def delete_point(self, collection: str, memory_id: str) -> None:
         """Delete all points for a given memory_id from a collection."""
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
         self.client.delete(
             collection_name=collection,
             points_selector=Filter(

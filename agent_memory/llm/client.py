@@ -6,14 +6,31 @@ import json
 import logging
 from typing import Any
 
-import litellm
-
 from agent_memory.config import MEMORY_CONFIG
 
 logger = logging.getLogger(__name__)
 
-# Suppress litellm's verbose logging
-litellm.suppress_debug_info = True
+_litellm = None
+
+
+def _get_litellm():
+    """Import litellm lazily so the module imports without the LLM dependency.
+
+    Keeps the core/logic modules importable on profiles that supply their own
+    LLM client or run without one (e.g. pure retrieval/storage usage).
+    """
+    global _litellm
+    if _litellm is None:
+        try:
+            import litellm
+        except ImportError as exc:  # pragma: no cover - dependency guard
+            raise ImportError(
+                "LLM calls require the 'llm' extra. "
+                "Install with: pip install agent-memory[llm]"
+            ) from exc
+        litellm.suppress_debug_info = True
+        _litellm = litellm
+    return _litellm
 
 
 async def llm_complete(
@@ -24,6 +41,7 @@ async def llm_complete(
     max_retries: int = 3,
 ) -> str:
     """Send a completion request via litellm and return the text response."""
+    litellm = _get_litellm()
     model = model or MEMORY_CONFIG["llm_model"]
     temperature = temperature if temperature is not None else MEMORY_CONFIG["llm_temperature"]
 

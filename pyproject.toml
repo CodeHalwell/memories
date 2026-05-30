@@ -8,17 +8,29 @@ version = "0.1.0"
 description = "Local-first, cognitively-inspired memory system for AI agents"
 readme = "README.md"
 requires-python = ">=3.11"
+# Core install is intentionally lightweight: raw-log (JSONL) + metadata (SQLite)
+# plus numpy for scoring math. Everything heavy is an opt-in extra so the system
+# can run on edge/serverless profiles. Heavy imports are deferred at runtime, so
+# importing the library never requires an extra that isn't installed.
 dependencies = [
-    "litellm>=1.40.0",
-    "sentence-transformers>=3.0.0",
-    "open-clip-torch>=2.24.0",
-    "qdrant-client>=1.9.0",
-    "kuzu>=0.4.0",
     "aiosqlite>=0.20.0",
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]
+# Individual capability tiers — install only what a given profile needs.
+llm = ["litellm>=1.40.0"]                       # LLM-driven save/merge/emotion
+text = ["sentence-transformers>=3.0.0"]         # local text embeddings (semantic search)
+visual = ["open-clip-torch>=2.24.0"]            # CLIP visual/spatial layer (pulls torch)
+graph = ["kuzu>=0.4.0"]                          # embedded graph relationships
+vectors = ["qdrant-client>=1.9.0"]              # embedded vector store
+
+# Convenience bundles.
+lite = ["agent-memory[llm,text,graph,vectors]"]          # full features, no torch/CLIP
+full = ["agent-memory[llm,text,visual,graph,vectors]"]   # everything (prior default)
+
 dev = [
+    "agent-memory[full]",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
