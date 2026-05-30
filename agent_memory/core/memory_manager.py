@@ -123,16 +123,20 @@ class MemoryManager:
     async def process_turn(
         self, session_id: str, turn: int, content: str,
         role: str = "assistant", token_count: int = 0,
-        model: str = "", provider: str = "",
+        model: str = "", provider: str = "", namespace: str = "default",
     ) -> Memory | None:
         """Log an agent output and decide whether to save it as a memory.
 
         This is the main entry point called at the end of each turn.
 
+        ``namespace`` isolates this turn's data to a tenant (e.g. a user or
+        agent id); it defaults to ``"default"`` for single-tenant use.
+
         Returns the Memory if one was created, else None.
         """
         # 1. Create and persist raw log entry
         entry = RawLogEntry(
+            namespace=namespace,
             session_id=session_id,
             turn=turn,
             content=content,
@@ -151,6 +155,7 @@ class MemoryManager:
             timestamp=entry.timestamp,
             file_path=file_path,
             byte_offset=byte_offset,
+            namespace=namespace,
         )
 
         # 3. Run save decision (A2.1: pass sqlite for gap awareness)
@@ -168,6 +173,10 @@ class MemoryManager:
         if memory is None:
             return None
 
+        # The save-decision layer is namespace-agnostic; stamp the namespace
+        # before persisting so every store records the tenant consistently.
+        memory.namespace = namespace
+
         # 5. Save the memory
         await self.sqlite.save_memory(memory)
 
@@ -180,6 +189,7 @@ class MemoryManager:
             valence=memory.valence,
             compaction_gen=memory.compaction_gen,
             created_at=memory.created_at,
+            namespace=namespace,
         )
         memory.graph_node_id = memory.id
         await self.sqlite.update_memory_graph_ref(memory.id, memory.id)
@@ -197,6 +207,7 @@ class MemoryManager:
                 arousal=memory.arousal,
                 session_id=session_id,
                 created_at=memory.created_at,
+                namespace=namespace,
             )
             memory.vector_id = point_id
             await self.sqlite.update_memory_vector_ref(memory.id, point_id)
@@ -211,17 +222,18 @@ class MemoryManager:
 
     async def retrieve(
         self, query: str, session_id: str | None = None,
-        top_k: int | None = None,
+        top_k: int | None = None, namespace: str = "default",
     ) -> list[Memory]:
         """Run three-layer retrieval and return ranked memories.
 
-        Also logs the retrieval decision for policy training (A4).
+        Results are isolated to ``namespace``. Also logs the retrieval decision
+        for policy training (A4).
         """
         if self._retrieval is None:
             raise RuntimeError("MemoryManager not initialized — call initialize() first")
 
         memories = await self._retrieval.retrieve(
-            query=query, session_id=session_id, top_k=top_k,
+            query=query, session_id=session_id, top_k=top_k, namespace=namespace,
             # Mood-congruent weighting needs the LLM; skip it on the lite
             # profile, which typically runs without the 'llm' extra.
             enable_mood_congruent=self._embeddings_loaded,
@@ -298,9 +310,15 @@ class MemoryManager:
 
         return result
 
-    async def get_memory(self, memory_id: str) -> Memory | None:
-        """Fetch a single memory and log the access."""
-        mem = await self.sqlite.get_memory(memory_id)
+    async def get_memory(
+        self, memory_id: str, namespace: str | None = None,
+    ) -> Memory | None:
+        """Fetch a single memory and log the access.
+
+        If ``namespace`` is given, the lookup is restricted to that namespace
+        (returns None for a memory belonging to a different tenant).
+        """
+        mem = await self.sqlite.get_memory(memory_id, namespace=namespace)
         if mem is None:
             return None
 
@@ -348,6 +366,7 @@ class MemoryManager:
                 vector=visual_vector,
                 session_id=memory.session_id,
                 created_at=memory.created_at,
+                namespace=memory.namespace,
             )
 
             # Update SQLite

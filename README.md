@@ -131,6 +131,23 @@ manager = MemoryManager()
 await manager.initialize(load_embeddings=False)   # no torch / no sentence-transformers
 ```
 
+## Multi-tenancy
+
+Every operation accepts an optional `namespace` (default `"default"`) that
+isolates data per tenant — a user, an agent, or any logical partition. Memories,
+retrieval, and single-memory lookups are scoped to their namespace, so one store
+can safely back many users:
+
+```python
+await manager.process_turn(session_id="s1", turn=1, content="...", namespace="user-42")
+results = await manager.retrieve("query", namespace="user-42")   # never sees other tenants
+```
+
+Isolation is enforced at the SQLite query layer (with `get_memory` as a
+catch-all safety net) and the vector payload filter. Databases created before
+the namespace column are migrated in place on open, with existing rows defaulting
+to `"default"`.
+
 ## Integrations
 
 ### MCP server

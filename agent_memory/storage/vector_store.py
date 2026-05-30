@@ -74,7 +74,7 @@ class VectorStore:
     def upsert_text_vector(
         self, memory_id: str, vector: list[float],
         tier: str = "hot", valence: float = 0.0, arousal: float = 0.0,
-        session_id: str = "", created_at: str = "",
+        session_id: str = "", created_at: str = "", namespace: str = "default",
     ) -> str:
         """Insert or update a text embedding. Returns the point ID."""
         from qdrant_client.models import PointStruct
@@ -93,6 +93,7 @@ class VectorStore:
                         "arousal": arousal,
                         "session_id": session_id,
                         "created_at": created_at,
+                        "namespace": namespace,
                     },
                 )
             ],
@@ -101,19 +102,21 @@ class VectorStore:
 
     def search_text(
         self, query_vector: list[float], limit: int = 5,
-        tier_filter: str | None = None,
+        tier_filter: str | None = None, namespace: str | None = None,
     ) -> list[dict]:
         """Search for nearest text embeddings.
 
         Returns list of dicts: {memory_id, score, tier, valence, arousal}.
+        Results are restricted to ``namespace`` when provided.
         """
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-        search_filter = None
+        must = []
         if tier_filter:
-            search_filter = Filter(
-                must=[FieldCondition(key="tier", match=MatchValue(value=tier_filter))]
-            )
+            must.append(FieldCondition(key="tier", match=MatchValue(value=tier_filter)))
+        if namespace is not None:
+            must.append(FieldCondition(key="namespace", match=MatchValue(value=namespace)))
+        search_filter = Filter(must=must) if must else None
 
         results = self.client.query_points(
             collection_name=TEXT_COLLECTION,
@@ -136,7 +139,7 @@ class VectorStore:
 
     def upsert_visual_vector(
         self, memory_id: str, vector: list[float],
-        session_id: str = "", created_at: str = "",
+        session_id: str = "", created_at: str = "", namespace: str = "default",
     ) -> str:
         """Insert or update a visual (CLIP) embedding. Returns the point ID."""
         from qdrant_client.models import PointStruct
@@ -152,6 +155,7 @@ class VectorStore:
                         "memory_id": memory_id,
                         "session_id": session_id,
                         "created_at": created_at,
+                        "namespace": namespace,
                     },
                 )
             ],
@@ -160,15 +164,25 @@ class VectorStore:
 
     def search_visual(
         self, query_vector: list[float], limit: int = 5,
+        namespace: str | None = None,
     ) -> list[dict]:
         """Search for nearest visual embeddings.
 
-        Returns list of dicts: {memory_id, score}.
+        Returns list of dicts: {memory_id, score}. Restricted to ``namespace``
+        when provided.
         """
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+        search_filter = None
+        if namespace is not None:
+            search_filter = Filter(
+                must=[FieldCondition(key="namespace", match=MatchValue(value=namespace))]
+            )
         results = self.client.query_points(
             collection_name=VISUAL_COLLECTION,
             query=query_vector,
             limit=limit,
+            query_filter=search_filter,
         )
         return [
             {"memory_id": r.payload["memory_id"], "score": r.score}

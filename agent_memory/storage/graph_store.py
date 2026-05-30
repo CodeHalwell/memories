@@ -67,6 +67,7 @@ class GraphStore:
                 valence DOUBLE,
                 compaction_gen INT64,
                 created_at STRING,
+                namespace STRING,
                 PRIMARY KEY (id)
             )""",
             """CREATE NODE TABLE IF NOT EXISTS Entity (
@@ -104,16 +105,18 @@ class GraphStore:
     def add_memory_node(
         self, memory_id: str, summary: str, tier: str = "hot",
         salience: float = 0.5, valence: float = 0.0,
-        compaction_gen: int = 0, created_at: str = "",
+        compaction_gen: int = 0, created_at: str = "", namespace: str = "default",
     ) -> None:
         self.conn.execute(
             "MERGE (m:Memory {id: $id}) SET m.summary = $summary, m.tier = $tier, "
             "m.salience = $salience, m.valence = $valence, "
-            "m.compaction_gen = $compaction_gen, m.created_at = $created_at",
+            "m.compaction_gen = $compaction_gen, m.created_at = $created_at, "
+            "m.namespace = $namespace",
             {
                 "id": memory_id, "summary": summary or "", "tier": tier,
                 "salience": salience, "valence": valence,
                 "compaction_gen": compaction_gen, "created_at": created_at,
+                "namespace": namespace,
             },
         )
 

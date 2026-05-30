@@ -23,9 +23,15 @@
   - ✅ **§3.1 MCP server (first cut)** — `agent_memory/integrations/mcp_server.py`
     exposes `memory_save/retrieve/get/compact` over MCP, built on a new
     transport-agnostic `MemoryService` facade (shared with future REST work).
-  - **Not yet:** provider Protocols (§2.3), namespacing (§2.4), framework
-    adapters (§3.2), edge/Rust build (§4.2+), REST + connectors (§5).
-  - Tests: 107 passing (+ MCP registration test when the `mcp` extra is present).
+  - ✅ **§2.4 Namespacing** — a `namespace` dimension (default `"default"`)
+    threaded through the models, SQLite (with an in-place migration for legacy
+    DBs), vector payloads, graph nodes, retrieval, the service facade, and the
+    MCP tools. Isolation is enforced at the SQLite query layer with `get_memory`
+    as a catch-all safety net, plus the vector payload filter on the full
+    profile. Multi-user chatbots and the hosted service can now share one store.
+  - **Not yet:** provider Protocols (§2.3), framework adapters (§3.2),
+    edge/Rust build (§4.2+), REST + connectors (§5).
+  - Tests: 112 passing (+ MCP registration test when the `mcp` extra is present).
 
 ---
 

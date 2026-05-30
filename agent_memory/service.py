@@ -33,6 +33,7 @@ def memory_to_dict(memory: Memory) -> dict[str, Any]:
         "id": memory.id,
         "content": memory.content,
         "summary": memory.summary,
+        "namespace": memory.namespace,
         "session_id": memory.session_id,
         "turn": memory.turn,
         "created_at": memory.created_at,
@@ -87,6 +88,7 @@ class MemoryService:
         session_id: str,
         turn: int = 0,
         role: str = "assistant",
+        namespace: str = "default",
     ) -> dict[str, Any]:
         """Log a conversation turn and let the system decide whether to save it.
 
@@ -94,6 +96,7 @@ class MemoryService:
         """
         memory = await self._manager.process_turn(
             session_id=session_id, turn=turn, content=content, role=role,
+            namespace=namespace,
         )
         return {
             "saved": memory is not None,
@@ -105,13 +108,14 @@ class MemoryService:
         query: str,
         session_id: str | None = None,
         top_k: int | None = None,
+        namespace: str = "default",
     ) -> dict[str, Any]:
         """Retrieve relevant memories for a query.
 
         Returns ``{"query": str, "count": int, "memories": [ {...}, ... ]}``.
         """
         memories = await self._manager.retrieve(
-            query=query, session_id=session_id, top_k=top_k,
+            query=query, session_id=session_id, top_k=top_k, namespace=namespace,
         )
         return {
             "query": query,
@@ -119,9 +123,12 @@ class MemoryService:
             "memories": [memory_to_dict(m) for m in memories],
         }
 
-    async def get_memory(self, memory_id: str) -> dict[str, Any] | None:
-        """Fetch a single memory by id (records an access). Returns None if absent."""
-        memory = await self._manager.get_memory(memory_id)
+    async def get_memory(
+        self, memory_id: str, namespace: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Fetch a single memory by id (records an access). Returns None if absent
+        or if it belongs to a different ``namespace`` (when one is given)."""
+        memory = await self._manager.get_memory(memory_id, namespace=namespace)
         return memory_to_dict(memory) if memory else None
 
     async def compact(self, trigger: str = "manual") -> dict[str, Any]:

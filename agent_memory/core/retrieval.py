@@ -58,10 +58,17 @@ class RetrievalEngine:
         query: str,
         session_id: str | None = None,
         top_k: int | None = None,
+        namespace: str = "default",
         enable_mood_congruent: bool = True,
         enable_visual: bool = True,
     ) -> list[Memory]:
-        """Run all retrieval layers and return ranked, deduplicated memories."""
+        """Run all retrieval layers and return ranked, deduplicated memories.
+
+        Results are isolated to ``namespace``: each layer filters by it where it
+        can, and loading from SQLite enforces it as a final safety net (so any
+        candidate surfaced by the grep layer or graph expansion that belongs to
+        another namespace is dropped).
+        """
         top_k = top_k or self.config["top_k_per_layer"]
 
         # Score current context for mood-congruent weighting
@@ -78,15 +85,15 @@ class RetrievalEngine:
         # (the lite profile skips it).
         layer_tasks: list[tuple[str, asyncio.Task]] = [
             ("grep", asyncio.create_task(self._grep_layer(query, top_k))),
-            ("keyword", asyncio.create_task(self._keyword_layer(query, top_k))),
+            ("keyword", asyncio.create_task(self._keyword_layer(query, top_k, namespace))),
         ]
         if self.embeddings_available:
             layer_tasks.append(
-                ("semantic", asyncio.create_task(self._semantic_layer(query, top_k)))
+                ("semantic", asyncio.create_task(self._semantic_layer(query, top_k, namespace)))
             )
         if enable_visual and self.visual_embedder:
             layer_tasks.append(
-                ("visual", asyncio.create_task(self._visual_layer(query, top_k)))
+                ("visual", asyncio.create_task(self._visual_layer(query, top_k, namespace)))
             )
 
         results = await asyncio.gather(
@@ -125,10 +132,11 @@ class RetrievalEngine:
                         memory_id=rid, score=depth_score, layers={"graph_traversal"},
                     )
 
-        # Load full memories from SQLite
+        # Load full memories from SQLite. Passing namespace enforces tenant
+        # isolation as a final safety net across all layers.
         memories: list[tuple[Memory, float]] = []
         for cand in candidates.values():
-            mem = await self.sqlite.get_memory(cand.memory_id)
+            mem = await self.sqlite.get_memory(cand.memory_id, namespace=namespace)
             if mem is None:
                 continue
 
@@ -245,7 +253,9 @@ class RetrievalEngine:
 
         return results
 
-    async def _keyword_layer(self, query: str, limit: int) -> list[tuple[str, float]]:
+    async def _keyword_layer(
+        self, query: str, limit: int, namespace: str = "default",
+    ) -> list[tuple[str, float]]:
         """Search by keywords extracted from the query.
 
         Combines two signals: extracted-keyword matches (high precision) and a
@@ -259,29 +269,37 @@ class RetrievalEngine:
             return []
 
         scores: dict[str, float] = {}
-        kw_memories = await self.sqlite.search_by_keywords(keywords, limit=limit)
+        kw_memories = await self.sqlite.search_by_keywords(
+            keywords, limit=limit, namespace=namespace,
+        )
         for m in kw_memories:
             scores[m.id] = max(scores.get(m.id, 0.0), m.decay_score)
 
-        content_memories = await self.sqlite.search_by_content(keywords, limit=limit)
+        content_memories = await self.sqlite.search_by_content(
+            keywords, limit=limit, namespace=namespace,
+        )
         for m in content_memories:
             # Slightly discount pure content matches relative to keyword hits.
             scores[m.id] = max(scores.get(m.id, 0.0), m.decay_score * 0.9)
 
         return list(scores.items())
 
-    async def _semantic_layer(self, query: str, limit: int) -> list[tuple[str, float]]:
+    async def _semantic_layer(
+        self, query: str, limit: int, namespace: str = "default",
+    ) -> list[tuple[str, float]]:
         """Search by vector similarity in text embedding space."""
         query_vector = self.text_embedder.embed(query)
-        results = self.vector.search_text(query_vector, limit=limit)
+        results = self.vector.search_text(query_vector, limit=limit, namespace=namespace)
         return [(r["memory_id"], r["score"]) for r in results]
 
-    async def _visual_layer(self, query: str, limit: int) -> list[tuple[str, float]]:
+    async def _visual_layer(
+        self, query: str, limit: int, namespace: str = "default",
+    ) -> list[tuple[str, float]]:
         """Search by visual/spatial similarity using CLIP embeddings."""
         if not self.visual_embedder:
             return []
         query_vector = self.visual_embedder.embed(query)
-        results = self.vector.search_visual(query_vector, limit=limit)
+        results = self.vector.search_visual(query_vector, limit=limit, namespace=namespace)
         return [(r["memory_id"], r["score"]) for r in results]
 
 

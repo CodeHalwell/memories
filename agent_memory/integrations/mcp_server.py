@@ -82,15 +82,18 @@ def create_server(service: MemoryService | None = None) -> FastMCP:
         session_id: str,
         turn: int = 0,
         role: str = "assistant",
+        namespace: str = "default",
     ) -> dict[str, Any]:
         """Record a conversation turn as a candidate memory.
 
         The system decides whether the turn is worth persisting (salience,
         emotion, novelty). Returns whether a memory was saved and its details.
+        ``namespace`` isolates data per tenant (e.g. a user or agent id).
         """
         await _ensure_ready()
         return await svc.save_turn(
             content=content, session_id=session_id, turn=turn, role=role,
+            namespace=namespace,
         )
 
     @server.tool()
@@ -98,16 +101,24 @@ def create_server(service: MemoryService | None = None) -> FastMCP:
         query: str,
         session_id: str | None = None,
         top_k: int | None = None,
+        namespace: str = "default",
     ) -> dict[str, Any]:
-        """Retrieve memories relevant to a query, ranked by relevance and decay."""
+        """Retrieve memories relevant to a query, ranked by relevance and decay.
+
+        Results are isolated to ``namespace``.
+        """
         await _ensure_ready()
-        return await svc.retrieve(query=query, session_id=session_id, top_k=top_k)
+        return await svc.retrieve(
+            query=query, session_id=session_id, top_k=top_k, namespace=namespace,
+        )
 
     @server.tool()
-    async def memory_get(memory_id: str) -> dict[str, Any] | None:
-        """Fetch a single memory by its id. Returns null if it does not exist."""
+    async def memory_get(
+        memory_id: str, namespace: str = "default",
+    ) -> dict[str, Any] | None:
+        """Fetch a single memory by its id within ``namespace``. Null if absent."""
         await _ensure_ready()
-        return await svc.get_memory(memory_id)
+        return await svc.get_memory(memory_id, namespace=namespace)
 
     @server.tool()
     async def memory_compact() -> dict[str, Any]:
