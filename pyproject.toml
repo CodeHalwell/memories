@@ -25,12 +25,15 @@ visual = ["open-clip-torch>=2.24.0"]            # CLIP visual/spatial layer (pul
 graph = ["kuzu>=0.4.0"]                          # embedded graph relationships
 vectors = ["qdrant-client>=1.9.0"]              # embedded vector store
 
+# Integration adapters (Track A/C of the integration roadmap).
+mcp = ["mcp>=1.2.0"]                              # Model Context Protocol server
+
 # Convenience bundles.
 lite = ["agent-memory[llm,text,graph,vectors]"]          # full features, no torch/CLIP
 full = ["agent-memory[llm,text,visual,graph,vectors]"]   # everything (prior default)
 
 dev = [
-    "agent-memory[full]",
+    "agent-memory[full,mcp]",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",

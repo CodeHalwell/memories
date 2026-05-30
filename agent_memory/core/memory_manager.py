@@ -62,25 +62,42 @@ class MemoryManager:
         # Sub-engines (initialized after storage is ready)
         self._retrieval: RetrievalEngine | None = None
         self._compaction: CompactionEngine | None = None
+        self._embeddings_loaded: bool = False
 
         # Track first turns per session
         self._first_turns: set[str] = set()
 
-    async def initialize(self) -> None:
-        """Initialize all storage backends. Must be called before any operations."""
+    async def initialize(self, load_embeddings: bool = True) -> None:
+        """Initialize storage backends and the retrieval/compaction engines.
+
+        Args:
+            load_embeddings: When True (default), load the text/visual embedding
+                models and initialize the vector store — required for semantic
+                and visual retrieval. When False, run on the **lite profile**:
+                storage and engines are wired, but the embedding models and
+                vector store are left unloaded. Retrieval then degrades
+                gracefully to the grep + keyword + graph layers, and the
+                semantic/visual layers are skipped. This lets the system run on
+                edge/serverless targets without the ``text``/``visual`` extras.
+        """
         await self.sqlite.initialize()
         self.graph.initialize()
-        self.vector.initialize(
-            text_dim=self.text_embedder.dimension,
-            visual_dim=self.visual_embedder.dimension,
-        )
+        if load_embeddings:
+            self.vector.initialize(
+                text_dim=self.text_embedder.dimension,
+                visual_dim=self.visual_embedder.dimension,
+            )
+        self._embeddings_loaded = load_embeddings
 
         self._retrieval = RetrievalEngine(
             sqlite=self.sqlite,
             graph=self.graph,
             vector=self.vector,
             text_embedder=self.text_embedder,
-            visual_embedder=self.visual_embedder,
+            # In lite mode, drop the visual embedder so the visual layer is
+            # skipped cleanly instead of failing per-query.
+            visual_embedder=self.visual_embedder if load_embeddings else None,
+            embeddings_available=load_embeddings,
         )
         self._compaction = CompactionEngine(
             sqlite=self.sqlite,
@@ -167,7 +184,9 @@ class MemoryManager:
         memory.graph_node_id = memory.id
         await self.sqlite.update_memory_graph_ref(memory.id, memory.id)
 
-        # 7. Create text embedding and store in Qdrant
+        # 7. Create text embedding and store in Qdrant (skipped on lite profile)
+        if not self._embeddings_loaded:
+            return memory
         try:
             text_vector = self.text_embedder.embed(memory.content)
             point_id = self.vector.upsert_text_vector(
@@ -203,6 +222,9 @@ class MemoryManager:
 
         memories = await self._retrieval.retrieve(
             query=query, session_id=session_id, top_k=top_k,
+            # Mood-congruent weighting needs the LLM; skip it on the lite
+            # profile, which typically runs without the 'llm' extra.
+            enable_mood_congruent=self._embeddings_loaded,
         )
 
         # A4: Log retrieval decision

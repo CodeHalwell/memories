@@ -41,12 +41,16 @@ class RetrievalEngine:
         vector: VectorStore,
         text_embedder: TextEmbedder,
         visual_embedder: VisualEmbedder | None = None,
+        embeddings_available: bool = True,
     ) -> None:
         self.sqlite = sqlite
         self.graph = graph
         self.vector = vector
         self.text_embedder = text_embedder
         self.visual_embedder = visual_embedder
+        # When False (lite profile), the semantic vector layer is skipped and
+        # retrieval relies on the grep + keyword + graph layers only.
+        self.embeddings_available = embeddings_available
         self.config = MEMORY_CONFIG
 
     async def retrieve(
@@ -68,28 +72,34 @@ class RetrievalEngine:
             except Exception:
                 logger.debug("Mood scoring failed, proceeding without")
 
-        # Run layers concurrently
-        grep_task = asyncio.create_task(self._grep_layer(query, top_k))
-        keyword_task = asyncio.create_task(self._keyword_layer(query, top_k))
-        semantic_task = asyncio.create_task(self._semantic_layer(query, top_k))
-
-        tasks = [grep_task, keyword_task, semantic_task]
-
-        visual_task = None
+        # Run layers concurrently. Each task is paired with its layer name so
+        # the merge step stays correct regardless of which layers are active.
+        # The semantic layer is included only when embeddings are available
+        # (the lite profile skips it).
+        layer_tasks: list[tuple[str, asyncio.Task]] = [
+            ("grep", asyncio.create_task(self._grep_layer(query, top_k))),
+            ("keyword", asyncio.create_task(self._keyword_layer(query, top_k))),
+        ]
+        if self.embeddings_available:
+            layer_tasks.append(
+                ("semantic", asyncio.create_task(self._semantic_layer(query, top_k)))
+            )
         if enable_visual and self.visual_embedder:
-            visual_task = asyncio.create_task(self._visual_layer(query, top_k))
-            tasks.append(visual_task)
+            layer_tasks.append(
+                ("visual", asyncio.create_task(self._visual_layer(query, top_k)))
+            )
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        results = await asyncio.gather(
+            *(t for _, t in layer_tasks), return_exceptions=True
+        )
 
         # Merge all candidates
         candidates: dict[str, _Candidate] = {}
 
-        for i, result in enumerate(results):
+        for (layer_name, _task), result in zip(layer_tasks, results):
             if isinstance(result, Exception):
-                logger.warning("Retrieval layer %d failed: %s", i, result)
+                logger.warning("Retrieval layer '%s' failed: %s", layer_name, result)
                 continue
-            layer_name = ["grep", "keyword", "semantic", "visual"][i]
             for mem_id, score in result:
                 if mem_id in candidates:
                     candidates[mem_id].score += score
@@ -236,12 +246,29 @@ class RetrievalEngine:
         return results
 
     async def _keyword_layer(self, query: str, limit: int) -> list[tuple[str, float]]:
-        """Search by keywords extracted from the query."""
+        """Search by keywords extracted from the query.
+
+        Combines two signals: extracted-keyword matches (high precision) and a
+        content substring fallback (high recall — also finds memories with no
+        extracted keywords, e.g. fast-path saves). The content fallback is what
+        keeps this layer effective on the lite/edge profile, where the semantic
+        vector layer is unavailable.
+        """
         keywords = [w.lower().strip() for w in query.split() if len(w) > 2]
         if not keywords:
             return []
-        memories = await self.sqlite.search_by_keywords(keywords, limit=limit)
-        return [(m.id, m.decay_score) for m in memories]
+
+        scores: dict[str, float] = {}
+        kw_memories = await self.sqlite.search_by_keywords(keywords, limit=limit)
+        for m in kw_memories:
+            scores[m.id] = max(scores.get(m.id, 0.0), m.decay_score)
+
+        content_memories = await self.sqlite.search_by_content(keywords, limit=limit)
+        for m in content_memories:
+            # Slightly discount pure content matches relative to keyword hits.
+            scores[m.id] = max(scores.get(m.id, 0.0), m.decay_score * 0.9)
+
+        return list(scores.items())
 
     async def _semantic_layer(self, query: str, limit: int) -> list[tuple[str, float]]:
         """Search by vector similarity in text embedding space."""

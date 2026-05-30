@@ -8,6 +8,27 @@
 
 ---
 
+## Progress log
+
+- **2026-05-30 — Phase 0 (foundations) + first slice of Phase 1 landed:**
+  - ✅ **§2.1 Public API** — `agent_memory/__init__.py` now exports
+    `MemoryManager`, the data models, `MEMORY_CONFIG`, and `__version__`.
+  - ✅ **§2.2 Dependency tiering** — heavy imports (kuzu, qdrant, torch/CLIP,
+    sentence-transformers, litellm) are deferred to first use; `pyproject`
+    extras split into `llm`/`text`/`visual`/`graph`/`vectors`/`mcp` plus
+    `lite`/`full` bundles. Core install is now `aiosqlite` + `numpy`.
+  - ✅ **§4.1 Lite profile (partial)** — `MemoryManager.initialize(load_embeddings=False)`
+    runs storage + retrieval without the embedding stack; retrieval falls back
+    to grep + keyword (incl. a new SQLite content-substring search) + graph.
+  - ✅ **§3.1 MCP server (first cut)** — `agent_memory/integrations/mcp_server.py`
+    exposes `memory_save/retrieve/get/compact` over MCP, built on a new
+    transport-agnostic `MemoryService` facade (shared with future REST work).
+  - **Not yet:** provider Protocols (§2.3), namespacing (§2.4), framework
+    adapters (§3.2), edge/Rust build (§4.2+), REST + connectors (§5).
+  - Tests: 107 passing (+ MCP registration test when the `mcp` extra is present).
+
+---
+
 ## 1. Where the project stands today
 
 The system is a **mature, feature-complete memory library** — but it is *only* a

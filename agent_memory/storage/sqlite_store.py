@@ -352,6 +352,58 @@ class SQLiteStore:
 
         return memories
 
+    async def search_by_content(
+        self, terms: list[str], limit: int = 10,
+    ) -> list[Memory]:
+        """Substring search over memory content for the given terms (OR).
+
+        A dependency-free fallback that retrieves memories even when no keywords
+        were extracted (e.g. fast-path/first-turn saves) and no embeddings are
+        available. This is what keeps retrieval working on the lite/edge profile,
+        where the semantic vector layer is absent. Results are ranked by the
+        number of distinct terms matched, weighted by decay score.
+        """
+        terms = [t for t in (t.strip() for t in terms) if t]
+        if not terms:
+            return []
+        # One LIKE clause per term; score by how many distinct terms match.
+        # The match-count expression can't be referenced by alias inside WHERE
+        # on all SQLite builds, so it is repeated (and its params supplied twice).
+        match_expr = " + ".join(
+            "(CASE WHEN m.content LIKE ? THEN 1 ELSE 0 END)" for _ in terms
+        )
+        like_params: list[object] = [f"%{t}%" for t in terms]
+        sql = f"""
+            SELECT m.*, ({match_expr}) AS match_count
+            FROM memories m
+            WHERE ({match_expr}) > 0
+            ORDER BY match_count * m.decay_score DESC
+            LIMIT ?
+        """
+        all_params = [*like_params, *like_params, limit]
+        memories: list[Memory] = []
+        async with self.db.execute(sql, all_params) as cur:
+            async for row in cur:
+                d = dict(row)
+                d.pop("match_count", None)
+                memories.append(_row_to_memory(d))
+
+        # Load keywords for results (mirror search_by_keywords).
+        if memories:
+            ids = [m.id for m in memories]
+            ph = ",".join("?" for _ in ids)
+            kw_map: dict[str, list[tuple[str, float]]] = {mid: [] for mid in ids}
+            async with self.db.execute(
+                f"SELECT memory_id, keyword, weight FROM memory_keywords WHERE memory_id IN ({ph})",
+                ids,
+            ) as cur:
+                async for row in cur:
+                    kw_map[row["memory_id"]].append((row["keyword"], row["weight"]))
+            for m in memories:
+                m.keywords = kw_map.get(m.id, [])
+
+        return memories
+
     async def update_keyword_weight(self, memory_id: str, keyword: str, weight: float) -> None:
         """Update a single keyword weight (used by keyword reweighting — A2.5)."""
         await self.db.execute(
