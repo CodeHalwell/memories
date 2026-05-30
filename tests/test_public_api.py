@@ -69,6 +69,11 @@ def test_core_logic_modules_import_on_core_profile():
         "agent_memory.embeddings.visual_embedder",
         "agent_memory.llm.client",
         "agent_memory.policy.controller",
+        # Service + integration adapters must also import on the core profile;
+        # their transport deps (mcp, fastapi) are imported lazily.
+        "agent_memory.service",
+        "agent_memory.integrations.mcp_server",
+        "agent_memory.integrations.rest_server",
     ]:
         assert importlib.import_module(mod) is not None
 

@@ -29,9 +29,14 @@
     MCP tools. Isolation is enforced at the SQLite query layer with `get_memory`
     as a catch-all safety net, plus the vector payload filter on the full
     profile. Multi-user chatbots and the hosted service can now share one store.
+  - ✅ **§5.1 REST service** — `agent_memory/integrations/rest_server.py`, a
+    FastAPI app over the same `MemoryService` facade (extra: `server`). Endpoints
+    for save/retrieve/get/compact/health, all namespace-aware. This is the HTTP
+    surface for hosted deployments and the chatbot connectors in §5.2.
   - **Not yet:** provider Protocols (§2.3), framework adapters (§3.2),
-    edge/Rust build (§4.2+), REST + connectors (§5).
-  - Tests: 112 passing (+ MCP registration test when the `mcp` extra is present).
+    edge/Rust build (§4.2+), platform connectors (§5.2), store scale-out (§5.3).
+  - Tests: 117 passing (guard tests for the `mcp`/`server` extras skip when the
+    extra is installed).
 
 ---
 

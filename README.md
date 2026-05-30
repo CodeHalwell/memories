@@ -163,6 +163,18 @@ python -m agent_memory.integrations.mcp_server
 Tools: `memory_save`, `memory_retrieve`, `memory_get`, `memory_compact`.
 Configure via `AGENT_MEMORY_DATA_DIR` and `AGENT_MEMORY_PROFILE` (`full`/`lite`).
 
+### REST service
+
+An HTTP surface for hosted deployments and chatbot connectors:
+
+```bash
+pip install -e ".[server]"
+uvicorn agent_memory.integrations.rest_server:app
+```
+
+Endpoints: `POST /memories`, `POST /retrieve`, `GET /memories/{id}`,
+`POST /compact`, `GET /health` — all namespace-aware, same env config as above.
+
 For programmatic/out-of-process use, `agent_memory.service.MemoryService`
 provides the same verbs as transport-agnostic, dict-in/dict-out `async` methods
 (shared by the MCP server and future REST/connector adapters).
