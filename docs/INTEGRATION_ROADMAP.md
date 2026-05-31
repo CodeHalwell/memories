@@ -33,10 +33,19 @@
     FastAPI app over the same `MemoryService` facade (extra: `server`). Endpoints
     for save/retrieve/get/compact/health, all namespace-aware. This is the HTTP
     surface for hosted deployments and the chatbot connectors in §5.2.
-  - **Not yet:** provider Protocols (§2.3), framework adapters (§3.2),
-    edge/Rust build (§4.2+), platform connectors (§5.2), store scale-out (§5.3).
   - Tests: 117 passing (guard tests for the `mcp`/`server` extras skip when the
     extra is installed).
+
+- **2026-05-31 — Phase 2 (framework adapters) started:**
+  - ✅ **§3.2 LangChain adapter** — `agent_memory/integrations/langchain.py`
+    provides `AgentMemoryRetriever` (a `BaseRetriever` returning `Document`s from
+    the multi-layer, namespace-scoped retrieval) plus `arecord_message` to
+    persist LangChain messages as memories (extra: `langchain`). Built on the
+    shared `MemoryService`; namespace isolation verified through the adapter.
+  - **Not yet:** provider Protocols (§2.3), more framework adapters
+    (LlamaIndex/CrewAI, §3.2), edge/Rust build (§4.2+), platform connectors
+    (§5.2), store scale-out (§5.3).
+  - Tests: 121 passing.
 
 ---
 

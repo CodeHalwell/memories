@@ -175,6 +175,27 @@ uvicorn agent_memory.integrations.rest_server:app
 Endpoints: `POST /memories`, `POST /retrieve`, `GET /memories/{id}`,
 `POST /compact`, `GET /health` — all namespace-aware, same env config as above.
 
+### LangChain
+
+A `BaseRetriever` (plus message-recording helpers) so a LangChain / LangGraph
+agent can use the system as long-term memory:
+
+```bash
+pip install -e ".[langchain]"
+```
+
+```python
+from agent_memory.service import MemoryService
+from agent_memory.integrations.langchain import AgentMemoryRetriever, arecord_message
+
+service = MemoryService(load_embeddings=False)
+await service.initialize()
+
+retriever = AgentMemoryRetriever(service=service, namespace="user-42")
+docs = await retriever.ainvoke("what does the user like?")      # -> list[Document]
+await arecord_message(service, ai_message, session_id="s1", turn=3, namespace="user-42")
+```
+
 For programmatic/out-of-process use, `agent_memory.service.MemoryService`
 provides the same verbs as transport-agnostic, dict-in/dict-out `async` methods
 (shared by the MCP server and future REST/connector adapters).
