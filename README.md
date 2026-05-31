@@ -196,6 +196,22 @@ docs = await retriever.ainvoke("what does the user like?")      # -> list[Docume
 await arecord_message(service, ai_message, session_id="s1", turn=3, namespace="user-42")
 ```
 
+### LlamaIndex
+
+A `BaseRetriever` (plus a message-recording helper) for LlamaIndex query engines
+and agents:
+
+```bash
+pip install -e ".[llamaindex]"
+```
+
+```python
+from agent_memory.integrations.llamaindex import AgentMemoryRetriever
+
+retriever = AgentMemoryRetriever(service, namespace="user-42")
+nodes = await retriever.aretrieve("what does the user like?")   # -> list[NodeWithScore]
+```
+
 For programmatic/out-of-process use, `agent_memory.service.MemoryService`
 provides the same verbs as transport-agnostic, dict-in/dict-out `async` methods
 (shared by the MCP server and future REST/connector adapters).

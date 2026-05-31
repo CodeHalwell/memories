@@ -36,16 +36,20 @@
   - Tests: 117 passing (guard tests for the `mcp`/`server` extras skip when the
     extra is installed).
 
-- **2026-05-31 — Phase 2 (framework adapters) started:**
+- **2026-05-31 — Phase 2 (framework adapters):**
   - ✅ **§3.2 LangChain adapter** — `agent_memory/integrations/langchain.py`
     provides `AgentMemoryRetriever` (a `BaseRetriever` returning `Document`s from
     the multi-layer, namespace-scoped retrieval) plus `arecord_message` to
     persist LangChain messages as memories (extra: `langchain`). Built on the
     shared `MemoryService`; namespace isolation verified through the adapter.
-  - **Not yet:** provider Protocols (§2.3), more framework adapters
-    (LlamaIndex/CrewAI, §3.2), edge/Rust build (§4.2+), platform connectors
-    (§5.2), store scale-out (§5.3).
-  - Tests: 121 passing.
+  - ✅ **§3.2 LlamaIndex adapter** — `agent_memory/integrations/llamaindex.py`
+    provides a LlamaIndex `BaseRetriever` returning scored `NodeWithScore`s
+    (descending rank score), plus `arecord_message` for `ChatMessage`s (extra:
+    `llamaindex`). Same `MemoryService` backing; namespace isolation verified.
+  - **Not yet:** provider Protocols (§2.3), more framework adapters (CrewAI/
+    AutoGen, §3.2), edge/Rust build (§4.2+), platform connectors (§5.2), store
+    scale-out (§5.3).
+  - Tests: 125 passing.
 
 ---
 
