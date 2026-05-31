@@ -71,10 +71,17 @@
     by an integration test that runs with torch absent.
   - This closes the Phase 0 foundations (public API, dependency tiering,
     namespacing, provider Protocols).
+  - ✅ **§5.2 Chat connector (framework-agnostic core)** —
+    `agent_memory/integrations/chat.py` provides `ChatConnector`: maps a
+    platform user to an isolated namespace and exposes `recall`,
+    `context_block`, `record_user_message`, `record_assistant_message`, and a
+    one-call `handle_turn`. No platform dependency — the reusable core for
+    Discord/Slack/Telegram/web bindings. Re-exported from
+    `agent_memory.integrations`.
   - **Not yet:** chat-history/memory halves of §3.2, more framework adapters
-    (CrewAI/AutoGen), edge/Rust build (§4.2+), platform connectors (§5.2),
-    store scale-out (§5.3).
-  - Tests: 141 passing.
+    (CrewAI/AutoGen), concrete platform bindings (Discord/Slack), edge/Rust
+    build (§4.2+), store scale-out (§5.3).
+  - Tests: 148 passing.
 
 ---
 

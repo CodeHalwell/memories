@@ -241,6 +241,29 @@ nodes = await retriever.aretrieve("what does the user like?")   # -> list[NodeWi
 > synchronous APIs raise, because the underlying store is bound to the event
 > loop it was initialized on.
 
+### Chatbots
+
+`ChatConnector` is a framework-agnostic helper (no platform dependency) for
+wiring a chatbot to per-user memory: it maps a platform user to an isolated
+namespace, recalls context before a reply, and records turns after.
+
+```python
+from agent_memory.service import MemoryService
+from agent_memory.integrations import ChatConnector
+
+service = MemoryService()
+await service.initialize()
+connector = ChatConnector(service, namespace_prefix="discord")
+
+# In your platform's message handler:
+context = await connector.context_block(user_id, message_text)   # "" if nothing relevant
+reply = await my_llm(system=context, user=message_text)
+await connector.record_assistant_message(user_id, reply)
+```
+
+Each user is isolated in their own namespace; the same pattern backs a Discord,
+Slack, Telegram, or web binding.
+
 For programmatic/out-of-process use, `agent_memory.service.MemoryService`
 provides the same verbs as transport-agnostic, dict-in/dict-out `async` methods
 (shared by the MCP server and future REST/connector adapters).
