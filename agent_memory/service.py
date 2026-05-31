@@ -60,8 +60,14 @@ class MemoryService:
         self,
         data_dir: Path | None = None,
         load_embeddings: bool = True,
+        text_embedder: Any = None,
+        visual_embedder: Any = None,
     ) -> None:
-        self._manager = MemoryManager(data_dir=data_dir)
+        self._manager = MemoryManager(
+            data_dir=data_dir,
+            text_embedder=text_embedder,
+            visual_embedder=visual_embedder,
+        )
         self._load_embeddings = load_embeddings
         self._initialized = False
 

@@ -131,6 +131,27 @@ manager = MemoryManager()
 await manager.initialize(load_embeddings=False)   # no torch / no sentence-transformers
 ```
 
+### Pluggable embedders (torch-free semantic search)
+
+Embedders are injected through small `Protocol`s (`TextEmbedderProtocol` /
+`VisualEmbedderProtocol`), so you can keep the semantic vector layer **without
+torch** by supplying a lightweight embedder. Bundled implementations:
+
+- `HashingTextEmbedder` — offline, deterministic lexical embeddings (no deps).
+- `CallableTextEmbedder` — wrap any `str -> sequence[float]` function (ONNX, a
+  remote embeddings API, …).
+- `NullVisualEmbedder` — disable the visual layer for text-only deployments.
+
+```python
+from agent_memory import MemoryManager, HashingTextEmbedder, NullVisualEmbedder
+
+manager = MemoryManager(
+    text_embedder=HashingTextEmbedder(dimension=256),
+    visual_embedder=NullVisualEmbedder(),
+)
+await manager.initialize()        # full semantic (Qdrant) path, no torch/CLIP
+```
+
 ## Multi-tenancy
 
 Every operation accepts an optional `namespace` (default `"default"`) that
@@ -216,9 +237,48 @@ retriever = AgentMemoryRetriever(service, namespace="user-42")
 nodes = await retriever.aretrieve("what does the user like?")   # -> list[NodeWithScore]
 ```
 
+### AutoGen
+
+An implementation of AutoGen's `Memory` interface — `update_context` injects
+relevant memories into the model context before each model call:
+
+```bash
+pip install -e ".[autogen]"
+```
+
+```python
+from agent_memory.integrations.autogen import AgentMemory
+
+memory = AgentMemory(service, namespace="user-42")
+# pass to an AutoGen agent: AssistantAgent(..., memory=[memory])
+```
+
 > Both retrievers are **async-native** — use `ainvoke` / `aretrieve`. The
 > synchronous APIs raise, because the underlying store is bound to the event
 > loop it was initialized on.
+
+### Chatbots
+
+`ChatConnector` is a framework-agnostic helper (no platform dependency) for
+wiring a chatbot to per-user memory: it maps a platform user to an isolated
+namespace, recalls context before a reply, and records turns after.
+
+```python
+from agent_memory.service import MemoryService
+from agent_memory.integrations import ChatConnector
+
+service = MemoryService()
+await service.initialize()
+connector = ChatConnector(service, namespace_prefix="discord")
+
+# In your platform's message handler:
+context = await connector.context_block(user_id, message_text)   # "" if nothing relevant
+reply = await my_llm(system=context, user=message_text)
+await connector.record_assistant_message(user_id, reply)
+```
+
+Each user is isolated in their own namespace; the same pattern backs a Discord,
+Slack, Telegram, or web binding.
 
 For programmatic/out-of-process use, `agent_memory.service.MemoryService`
 provides the same verbs as transport-agnostic, dict-in/dict-out `async` methods

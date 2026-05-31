@@ -30,13 +30,14 @@ mcp = ["mcp>=1.2.0"]                              # Model Context Protocol serve
 server = ["fastapi>=0.110", "uvicorn>=0.29"]     # REST/HTTP service
 langchain = ["langchain-core>=0.3"]              # LangChain retriever + helpers
 llamaindex = ["llama-index-core>=0.11"]          # LlamaIndex retriever + helpers
+autogen = ["autogen-core>=0.4"]                  # AutoGen Memory adapter
 
 # Convenience bundles.
 lite = ["agent-memory[llm,text,graph,vectors]"]          # full features, no torch/CLIP
 full = ["agent-memory[llm,text,visual,graph,vectors]"]   # everything (prior default)
 
 dev = [
-    "agent-memory[full,mcp,server,langchain,llamaindex]",
+    "agent-memory[full,mcp,server,langchain,llamaindex,autogen]",
     "httpx>=0.27",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

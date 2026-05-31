@@ -19,6 +19,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from agent_memory.config import DATA_DIR, MEMORY_CONFIG
 from agent_memory.core.compaction import CompactionEngine
@@ -39,13 +40,24 @@ from agent_memory.storage.jsonl_log import JSONLLogger
 from agent_memory.storage.sqlite_store import SQLiteStore
 from agent_memory.storage.vector_store import VectorStore
 
+if TYPE_CHECKING:
+    from agent_memory.embeddings.base import (
+        TextEmbedderProtocol,
+        VisualEmbedderProtocol,
+    )
+
 logger = logging.getLogger(__name__)
 
 
 class MemoryManager:
     """Top-level orchestrator for the agent memory system."""
 
-    def __init__(self, data_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        data_dir: Path | None = None,
+        text_embedder: "TextEmbedderProtocol | None" = None,
+        visual_embedder: "VisualEmbedderProtocol | None" = None,
+    ) -> None:
         self.data_dir = data_dir or DATA_DIR
         self.config = MEMORY_CONFIG
 
@@ -55,9 +67,13 @@ class MemoryManager:
         self.graph = GraphStore(self.data_dir / "graph")
         self.vector = VectorStore(self.data_dir / "vectors")
 
-        # Embedding models (lazy-loaded)
-        self.text_embedder = TextEmbedder()
-        self.visual_embedder = VisualEmbedder()
+        # Embedding providers (injectable). Defaults are the model-backed
+        # wrappers (lazy-loaded). Inject a torch-free embedder (e.g.
+        # HashingTextEmbedder + NullVisualEmbedder) to run semantic retrieval on
+        # the edge profile without the heavy `text`/`visual` extras.
+        self.text_embedder = text_embedder if text_embedder is not None else TextEmbedder()
+        self.visual_embedder = visual_embedder if visual_embedder is not None else VisualEmbedder()
+        self._visual_enabled = not getattr(self.visual_embedder, "is_null", False)
 
         # Sub-engines (initialized after storage is ready)
         self._retrieval: RetrievalEngine | None = None
@@ -94,9 +110,12 @@ class MemoryManager:
             graph=self.graph,
             vector=self.vector,
             text_embedder=self.text_embedder,
-            # In lite mode, drop the visual embedder so the visual layer is
-            # skipped cleanly instead of failing per-query.
-            visual_embedder=self.visual_embedder if load_embeddings else None,
+            # Drop the visual embedder when embeddings are off (lite profile) or
+            # when visual is disabled (NullVisualEmbedder), so the visual layer
+            # is skipped cleanly instead of failing per-query.
+            visual_embedder=(
+                self.visual_embedder if (load_embeddings and self._visual_enabled) else None
+            ),
             embeddings_available=load_embeddings,
         )
         self._compaction = CompactionEngine(
@@ -214,8 +233,9 @@ class MemoryManager:
         except Exception:
             logger.exception("Failed to create text embedding for memory %s", memory.id)
 
-        # 8. Visual layer — generate scene description and CLIP embedding for salient memories
-        if memory.salience > self.config["visual_salience_threshold"]:
+        # 8. Visual layer — generate scene description and CLIP embedding for
+        # salient memories (skipped when visual is disabled / text-only profile)
+        if self._visual_enabled and memory.salience > self.config["visual_salience_threshold"]:
             await self._generate_visual_layer(memory)
 
         return memory
