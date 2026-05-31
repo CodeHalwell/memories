@@ -13,6 +13,7 @@ from agent_memory.models import CompactionResult, Memory, SaveDecision
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS raw_log_index (
     id          TEXT PRIMARY KEY,
+    namespace   TEXT NOT NULL DEFAULT 'default',
     session_id  TEXT NOT NULL,
     turn        INTEGER NOT NULL,
     timestamp   TEXT NOT NULL,
@@ -27,6 +28,7 @@ CREATE TABLE IF NOT EXISTS memories (
     content           TEXT NOT NULL,
     summary           TEXT,
     raw_log_id        TEXT NOT NULL,
+    namespace         TEXT NOT NULL DEFAULT 'default',
     session_id        TEXT NOT NULL,
     turn              INTEGER NOT NULL,
     valence           REAL,
@@ -56,6 +58,8 @@ CREATE TABLE IF NOT EXISTS memory_keywords (
 );
 
 CREATE INDEX IF NOT EXISTS idx_keyword ON memory_keywords(keyword);
+-- The memories(namespace) index is created in _migrate(), after the namespace
+-- column is ensured (it may be absent on databases predating that column).
 
 CREATE TABLE IF NOT EXISTS memory_access_log (
     id          TEXT PRIMARY KEY,
@@ -159,7 +163,31 @@ class SQLiteStore:
         self._db = await aiosqlite.connect(str(self.db_path))
         self._db.row_factory = aiosqlite.Row
         await self._db.executescript(_SCHEMA)
+        await self._migrate()
         await self._db.commit()
+
+    async def _migrate(self) -> None:
+        """Apply additive schema migrations to pre-existing databases.
+
+        ``CREATE TABLE IF NOT EXISTS`` does not alter an already-existing table,
+        so columns added after a database was first created must be backfilled
+        here. All migrations are additive and idempotent.
+        """
+        await self._add_column_if_missing(
+            "memories", "namespace", "TEXT NOT NULL DEFAULT 'default'"
+        )
+        await self._add_column_if_missing(
+            "raw_log_index", "namespace", "TEXT NOT NULL DEFAULT 'default'"
+        )
+        await self.db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_memories_namespace ON memories(namespace)"
+        )
+
+    async def _add_column_if_missing(self, table: str, column: str, decl: str) -> None:
+        async with self.db.execute(f"PRAGMA table_info({table})") as cur:
+            existing = {row["name"] async for row in cur}
+        if column not in existing:
+            await self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
 
     async def close(self) -> None:
         if self._db:
@@ -176,11 +204,13 @@ class SQLiteStore:
     async def index_raw_log(
         self, entry_id: str, session_id: str, turn: int,
         timestamp: str, file_path: str, byte_offset: int,
+        namespace: str = "default",
     ) -> None:
         await self.db.execute(
-            "INSERT OR IGNORE INTO raw_log_index (id, session_id, turn, timestamp, file_path, byte_offset) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (entry_id, session_id, turn, timestamp, file_path, byte_offset),
+            "INSERT OR IGNORE INTO raw_log_index "
+            "(id, namespace, session_id, turn, timestamp, file_path, byte_offset) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (entry_id, namespace, session_id, turn, timestamp, file_path, byte_offset),
         )
         await self.db.commit()
 
@@ -196,14 +226,14 @@ class SQLiteStore:
     async def save_memory(self, mem: Memory) -> None:
         await self.db.execute(
             """INSERT OR REPLACE INTO memories
-            (id, created_at, updated_at, content, summary, raw_log_id, session_id, turn,
+            (id, created_at, updated_at, content, summary, raw_log_id, namespace, session_id, turn,
              valence, arousal, surprise, salience, access_count, last_accessed, decay_score,
              compaction_gen, tier, fast_pathed, is_semantic, graph_node_id, vector_id,
              spatial_embedding, scene_description)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 mem.id, mem.created_at, mem.updated_at, mem.content, mem.summary,
-                mem.raw_log_id, mem.session_id, mem.turn,
+                mem.raw_log_id, mem.namespace, mem.session_id, mem.turn,
                 mem.valence, mem.arousal, mem.surprise, mem.salience,
                 mem.access_count, mem.last_accessed, mem.decay_score,
                 mem.compaction_gen, mem.tier, int(mem.fast_pathed), int(mem.is_semantic),
@@ -220,10 +250,15 @@ class SQLiteStore:
             )
         await self.db.commit()
 
-    async def get_memory(self, memory_id: str) -> Memory | None:
-        async with self.db.execute(
-            "SELECT * FROM memories WHERE id = ?", (memory_id,)
-        ) as cur:
+    async def get_memory(
+        self, memory_id: str, namespace: str | None = None,
+    ) -> Memory | None:
+        if namespace is None:
+            sql, params = "SELECT * FROM memories WHERE id = ?", (memory_id,)
+        else:
+            sql = "SELECT * FROM memories WHERE id = ? AND namespace = ?"
+            params = (memory_id, namespace)
+        async with self.db.execute(sql, params) as cur:
             row = await cur.fetchone()
             if not row:
                 return None
@@ -317,26 +352,82 @@ class SQLiteStore:
     # ── Keyword search ──
 
     async def search_by_keywords(
-        self, keywords: list[str], limit: int = 10,
+        self, keywords: list[str], limit: int = 10, namespace: str | None = None,
     ) -> list[Memory]:
         if not keywords:
             return []
         placeholders = ",".join("?" for _ in keywords)
+        ns_clause = "" if namespace is None else "AND m.namespace = ?"
+        ns_params: tuple = () if namespace is None else (namespace,)
         sql = f"""
             SELECT m.*, SUM(mk.weight) as match_score
             FROM memories m
             JOIN memory_keywords mk ON m.id = mk.memory_id
-            WHERE mk.keyword IN ({placeholders})
+            WHERE mk.keyword IN ({placeholders}) {ns_clause}
             GROUP BY m.id
             ORDER BY match_score * m.decay_score DESC
             LIMIT ?
         """
         memories = []
-        async with self.db.execute(sql, (*keywords, limit)) as cur:
+        async with self.db.execute(sql, (*keywords, *ns_params, limit)) as cur:
             async for row in cur:
                 memories.append(_row_to_memory(dict(row)))
 
         # Load keywords for results
+        if memories:
+            ids = [m.id for m in memories]
+            ph = ",".join("?" for _ in ids)
+            kw_map: dict[str, list[tuple[str, float]]] = {mid: [] for mid in ids}
+            async with self.db.execute(
+                f"SELECT memory_id, keyword, weight FROM memory_keywords WHERE memory_id IN ({ph})",
+                ids,
+            ) as cur:
+                async for row in cur:
+                    kw_map[row["memory_id"]].append((row["keyword"], row["weight"]))
+            for m in memories:
+                m.keywords = kw_map.get(m.id, [])
+
+        return memories
+
+    async def search_by_content(
+        self, terms: list[str], limit: int = 10, namespace: str | None = None,
+    ) -> list[Memory]:
+        """Substring search over memory content for the given terms (OR).
+
+        A dependency-free fallback that retrieves memories even when no keywords
+        were extracted (e.g. fast-path/first-turn saves) and no embeddings are
+        available. This is what keeps retrieval working on the lite/edge profile,
+        where the semantic vector layer is absent. Results are ranked by the
+        number of distinct terms matched, weighted by decay score.
+        """
+        terms = [t for t in (t.strip() for t in terms) if t]
+        if not terms:
+            return []
+        # One LIKE clause per term; score by how many distinct terms match.
+        # The match-count expression can't be referenced by alias inside WHERE
+        # on all SQLite builds, so it is repeated (and its params supplied twice).
+        match_expr = " + ".join(
+            "(CASE WHEN m.content LIKE ? THEN 1 ELSE 0 END)" for _ in terms
+        )
+        like_params: list[object] = [f"%{t}%" for t in terms]
+        ns_clause = "" if namespace is None else "AND m.namespace = ?"
+        ns_params: list[object] = [] if namespace is None else [namespace]
+        sql = f"""
+            SELECT m.*, ({match_expr}) AS match_count
+            FROM memories m
+            WHERE ({match_expr}) > 0 {ns_clause}
+            ORDER BY match_count * m.decay_score DESC
+            LIMIT ?
+        """
+        all_params = [*like_params, *like_params, *ns_params, limit]
+        memories: list[Memory] = []
+        async with self.db.execute(sql, all_params) as cur:
+            async for row in cur:
+                d = dict(row)
+                d.pop("match_count", None)
+                memories.append(_row_to_memory(d))
+
+        # Load keywords for results (mirror search_by_keywords).
         if memories:
             ids = [m.id for m in memories]
             ph = ",".join("?" for _ in ids)
@@ -677,6 +768,7 @@ def _row_to_memory(row: dict) -> Memory:
         content=row["content"],
         summary=row.get("summary"),
         raw_log_id=row["raw_log_id"],
+        namespace=row.get("namespace", "default"),
         session_id=row["session_id"],
         turn=row["turn"],
         valence=row.get("valence", 0.0),

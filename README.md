@@ -94,20 +94,90 @@ agent_memory/
 
 ## Installation
 
+Requires Python 3.11+. Dependencies are tiered so you install only what a given
+deployment needs — the core install is lightweight (SQLite + JSONL + numpy) and
+every heavy backend is an opt-in extra. Heavy imports are deferred at runtime,
+so importing the library never requires an extra you haven't installed.
+
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[full]"     # everything (prior default behaviour)
+pip install -e ".[lite]"     # full features without torch/CLIP (no visual layer)
+pip install -e ".[dev]"      # full + mcp + test tooling
 ```
 
-Requires Python 3.11+.
+### Dependency extras
 
-### Dependencies
+| Extra | Pulls in | Enables |
+|-------|----------|---------|
+| *(core)* | `aiosqlite`, `numpy` | raw logs + metadata + scoring |
+| `llm` | `litellm` | LLM-driven save/merge/emotion scoring |
+| `text` | `sentence-transformers` | local text embeddings (semantic search) |
+| `visual` | `open-clip-torch` (torch) | CLIP visual/spatial layer |
+| `graph` | `kuzu` | embedded graph relationships |
+| `vectors` | `qdrant-client` | embedded vector store |
+| `mcp` | `mcp` | Model Context Protocol server |
+| `lite` | llm + text + graph + vectors | full features, no torch/CLIP |
+| `full` | + visual | everything |
 
-- **litellm** — Provider-agnostic LLM inference
-- **sentence-transformers** — Text embeddings (default: `all-MiniLM-L6-v2`)
-- **open-clip-torch** — Visual embeddings (default: `ViT-B-32`)
-- **qdrant-client** — Embedded vector store
-- **kuzu** — Embedded graph database
-- **aiosqlite** — Async SQLite access
+### Lite / edge profile
+
+For edge, serverless, or air-gapped targets you can run without the embedding
+stack. Initialize with `load_embeddings=False`: storage and retrieval still
+work, with the semantic/visual layers skipped and retrieval falling back to the
+grep + keyword (incl. content substring) + graph layers.
+
+```python
+manager = MemoryManager()
+await manager.initialize(load_embeddings=False)   # no torch / no sentence-transformers
+```
+
+## Multi-tenancy
+
+Every operation accepts an optional `namespace` (default `"default"`) that
+isolates data per tenant — a user, an agent, or any logical partition. Memories,
+retrieval, and single-memory lookups are scoped to their namespace, so one store
+can safely back many users:
+
+```python
+await manager.process_turn(session_id="s1", turn=1, content="...", namespace="user-42")
+results = await manager.retrieve("query", namespace="user-42")   # never sees other tenants
+```
+
+Isolation is enforced at the SQLite query layer (with `get_memory` as a
+catch-all safety net) and the vector payload filter. Databases created before
+the namespace column are migrated in place on open, with existing rows defaulting
+to `"default"`.
+
+## Integrations
+
+### MCP server
+
+Expose memory to any MCP-capable client (Claude Desktop/Code, the Agent SDK, or
+other agent frameworks) with no per-framework code:
+
+```bash
+pip install -e ".[mcp]"      # or ".[lite]" / ".[full]" plus ".[mcp]"
+python -m agent_memory.integrations.mcp_server
+```
+
+Tools: `memory_save`, `memory_retrieve`, `memory_get`, `memory_compact`.
+Configure via `AGENT_MEMORY_DATA_DIR` and `AGENT_MEMORY_PROFILE` (`full`/`lite`).
+
+### REST service
+
+An HTTP surface for hosted deployments and chatbot connectors:
+
+```bash
+pip install -e ".[server]"
+uvicorn agent_memory.integrations.rest_server:app
+```
+
+Endpoints: `POST /memories`, `POST /retrieve`, `GET /memories/{id}`,
+`POST /compact`, `GET /health` — all namespace-aware, same env config as above.
+
+For programmatic/out-of-process use, `agent_memory.service.MemoryService`
+provides the same verbs as transport-agnostic, dict-in/dict-out `async` methods
+(shared by the MCP server and future REST/connector adapters).
 
 ## Usage
 

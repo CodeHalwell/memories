@@ -8,16 +8,23 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-
-import kuzu
+from typing import TYPE_CHECKING
 
 from agent_memory.config import GRAPH_DIR
+
+if TYPE_CHECKING:
+    import kuzu
 
 logger = logging.getLogger(__name__)
 
 
 class GraphStore:
-    """Kuzu-backed graph for memory relationships."""
+    """Kuzu-backed graph for memory relationships.
+
+    The ``kuzu`` import is deferred to ``initialize()`` so this module can be
+    imported on profiles without the ``graph`` extra installed (the graph layer
+    is optional on the lite/edge profile).
+    """
 
     def __init__(self, graph_dir: Path | None = None) -> None:
         self.graph_dir = graph_dir or GRAPH_DIR
@@ -25,6 +32,13 @@ class GraphStore:
         self._conn: kuzu.Connection | None = None
 
     def initialize(self) -> None:
+        try:
+            import kuzu
+        except ImportError as exc:  # pragma: no cover - dependency guard
+            raise ImportError(
+                "GraphStore requires the 'graph' extra. "
+                "Install with: pip install agent-memory[graph]"
+            ) from exc
         # Kuzu creates the database directory itself; only ensure the parent exists
         self.graph_dir.parent.mkdir(parents=True, exist_ok=True)
         self._db = kuzu.Database(str(self.graph_dir))
@@ -53,6 +67,7 @@ class GraphStore:
                 valence DOUBLE,
                 compaction_gen INT64,
                 created_at STRING,
+                namespace STRING,
                 PRIMARY KEY (id)
             )""",
             """CREATE NODE TABLE IF NOT EXISTS Entity (
@@ -90,16 +105,18 @@ class GraphStore:
     def add_memory_node(
         self, memory_id: str, summary: str, tier: str = "hot",
         salience: float = 0.5, valence: float = 0.0,
-        compaction_gen: int = 0, created_at: str = "",
+        compaction_gen: int = 0, created_at: str = "", namespace: str = "default",
     ) -> None:
         self.conn.execute(
             "MERGE (m:Memory {id: $id}) SET m.summary = $summary, m.tier = $tier, "
             "m.salience = $salience, m.valence = $valence, "
-            "m.compaction_gen = $compaction_gen, m.created_at = $created_at",
+            "m.compaction_gen = $compaction_gen, m.created_at = $created_at, "
+            "m.namespace = $namespace",
             {
                 "id": memory_id, "summary": summary or "", "tier": tier,
                 "salience": salience, "valence": valence,
                 "compaction_gen": compaction_gen, "created_at": created_at,
+                "namespace": namespace,
             },
         )
 

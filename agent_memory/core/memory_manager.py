@@ -62,25 +62,42 @@ class MemoryManager:
         # Sub-engines (initialized after storage is ready)
         self._retrieval: RetrievalEngine | None = None
         self._compaction: CompactionEngine | None = None
+        self._embeddings_loaded: bool = False
 
         # Track first turns per session
         self._first_turns: set[str] = set()
 
-    async def initialize(self) -> None:
-        """Initialize all storage backends. Must be called before any operations."""
+    async def initialize(self, load_embeddings: bool = True) -> None:
+        """Initialize storage backends and the retrieval/compaction engines.
+
+        Args:
+            load_embeddings: When True (default), load the text/visual embedding
+                models and initialize the vector store — required for semantic
+                and visual retrieval. When False, run on the **lite profile**:
+                storage and engines are wired, but the embedding models and
+                vector store are left unloaded. Retrieval then degrades
+                gracefully to the grep + keyword + graph layers, and the
+                semantic/visual layers are skipped. This lets the system run on
+                edge/serverless targets without the ``text``/``visual`` extras.
+        """
         await self.sqlite.initialize()
         self.graph.initialize()
-        self.vector.initialize(
-            text_dim=self.text_embedder.dimension,
-            visual_dim=self.visual_embedder.dimension,
-        )
+        if load_embeddings:
+            self.vector.initialize(
+                text_dim=self.text_embedder.dimension,
+                visual_dim=self.visual_embedder.dimension,
+            )
+        self._embeddings_loaded = load_embeddings
 
         self._retrieval = RetrievalEngine(
             sqlite=self.sqlite,
             graph=self.graph,
             vector=self.vector,
             text_embedder=self.text_embedder,
-            visual_embedder=self.visual_embedder,
+            # In lite mode, drop the visual embedder so the visual layer is
+            # skipped cleanly instead of failing per-query.
+            visual_embedder=self.visual_embedder if load_embeddings else None,
+            embeddings_available=load_embeddings,
         )
         self._compaction = CompactionEngine(
             sqlite=self.sqlite,
@@ -106,16 +123,20 @@ class MemoryManager:
     async def process_turn(
         self, session_id: str, turn: int, content: str,
         role: str = "assistant", token_count: int = 0,
-        model: str = "", provider: str = "",
+        model: str = "", provider: str = "", namespace: str = "default",
     ) -> Memory | None:
         """Log an agent output and decide whether to save it as a memory.
 
         This is the main entry point called at the end of each turn.
 
+        ``namespace`` isolates this turn's data to a tenant (e.g. a user or
+        agent id); it defaults to ``"default"`` for single-tenant use.
+
         Returns the Memory if one was created, else None.
         """
         # 1. Create and persist raw log entry
         entry = RawLogEntry(
+            namespace=namespace,
             session_id=session_id,
             turn=turn,
             content=content,
@@ -134,6 +155,7 @@ class MemoryManager:
             timestamp=entry.timestamp,
             file_path=file_path,
             byte_offset=byte_offset,
+            namespace=namespace,
         )
 
         # 3. Run save decision (A2.1: pass sqlite for gap awareness)
@@ -151,6 +173,10 @@ class MemoryManager:
         if memory is None:
             return None
 
+        # The save-decision layer is namespace-agnostic; stamp the namespace
+        # before persisting so every store records the tenant consistently.
+        memory.namespace = namespace
+
         # 5. Save the memory
         await self.sqlite.save_memory(memory)
 
@@ -163,11 +189,14 @@ class MemoryManager:
             valence=memory.valence,
             compaction_gen=memory.compaction_gen,
             created_at=memory.created_at,
+            namespace=namespace,
         )
         memory.graph_node_id = memory.id
         await self.sqlite.update_memory_graph_ref(memory.id, memory.id)
 
-        # 7. Create text embedding and store in Qdrant
+        # 7. Create text embedding and store in Qdrant (skipped on lite profile)
+        if not self._embeddings_loaded:
+            return memory
         try:
             text_vector = self.text_embedder.embed(memory.content)
             point_id = self.vector.upsert_text_vector(
@@ -178,6 +207,7 @@ class MemoryManager:
                 arousal=memory.arousal,
                 session_id=session_id,
                 created_at=memory.created_at,
+                namespace=namespace,
             )
             memory.vector_id = point_id
             await self.sqlite.update_memory_vector_ref(memory.id, point_id)
@@ -192,17 +222,21 @@ class MemoryManager:
 
     async def retrieve(
         self, query: str, session_id: str | None = None,
-        top_k: int | None = None,
+        top_k: int | None = None, namespace: str = "default",
     ) -> list[Memory]:
         """Run three-layer retrieval and return ranked memories.
 
-        Also logs the retrieval decision for policy training (A4).
+        Results are isolated to ``namespace``. Also logs the retrieval decision
+        for policy training (A4).
         """
         if self._retrieval is None:
             raise RuntimeError("MemoryManager not initialized — call initialize() first")
 
         memories = await self._retrieval.retrieve(
-            query=query, session_id=session_id, top_k=top_k,
+            query=query, session_id=session_id, top_k=top_k, namespace=namespace,
+            # Mood-congruent weighting needs the LLM; skip it on the lite
+            # profile, which typically runs without the 'llm' extra.
+            enable_mood_congruent=self._embeddings_loaded,
         )
 
         # A4: Log retrieval decision
@@ -276,9 +310,15 @@ class MemoryManager:
 
         return result
 
-    async def get_memory(self, memory_id: str) -> Memory | None:
-        """Fetch a single memory and log the access."""
-        mem = await self.sqlite.get_memory(memory_id)
+    async def get_memory(
+        self, memory_id: str, namespace: str | None = None,
+    ) -> Memory | None:
+        """Fetch a single memory and log the access.
+
+        If ``namespace`` is given, the lookup is restricted to that namespace
+        (returns None for a memory belonging to a different tenant).
+        """
+        mem = await self.sqlite.get_memory(memory_id, namespace=namespace)
         if mem is None:
             return None
 
@@ -326,6 +366,7 @@ class MemoryManager:
                 vector=visual_vector,
                 session_id=memory.session_id,
                 created_at=memory.created_at,
+                namespace=memory.namespace,
             )
 
             # Update SQLite

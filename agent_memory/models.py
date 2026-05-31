@@ -18,6 +18,7 @@ def _uuid() -> str:
 @dataclass
 class RawLogEntry:
     id: str = field(default_factory=_uuid)
+    namespace: str = "default"
     session_id: str = ""
     turn: int = 0
     timestamp: str = field(default_factory=_now)
@@ -36,6 +37,9 @@ class Memory:
     content: str = ""
     summary: str | None = None
     raw_log_id: str = ""
+    # Tenancy: memories are isolated per namespace (e.g. a user or agent id).
+    # Defaults to "default" so single-tenant usage is unchanged.
+    namespace: str = "default"
     session_id: str = ""
     turn: int = 0
 
