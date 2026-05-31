@@ -37,13 +37,21 @@ class TextEmbedderProtocol(Protocol):
 
 @runtime_checkable
 class VisualEmbedderProtocol(Protocol):
-    """Structural type for visual/spatial embedders (optional layer)."""
+    """Structural type for visual/spatial embedders (optional layer).
+
+    Includes ``embed_to_bytes`` because ``MemoryManager``'s visual layer
+    serializes the embedding to a SQLite BLOB via this method — a conforming
+    provider must implement it.
+    """
 
     @property
     def dimension(self) -> int:
         ...
 
     def embed(self, text: str) -> list[float]:
+        ...
+
+    def embed_to_bytes(self, text: str) -> bytes:
         ...
 
 
@@ -108,7 +116,14 @@ class CallableTextEmbedder:
         return self._dimension
 
     def embed(self, text: str) -> list[float]:
-        return [float(x) for x in self._fn(text)]
+        vec = [float(x) for x in self._fn(text)]
+        if len(vec) != self._dimension:
+            raise ValueError(
+                f"embedded vector length {len(vec)} does not match the declared "
+                f"dimension {self._dimension}; this would be rejected by the vector "
+                f"store. Fix the function or the declared dimension."
+            )
+        return vec
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         return [self.embed(t) for t in texts]
@@ -126,6 +141,8 @@ class NullVisualEmbedder:
     is_null = True
 
     def __init__(self, dimension: int = 512) -> None:
+        if dimension <= 0:
+            raise ValueError("dimension must be positive")
         self._dimension = dimension
 
     @property
@@ -133,6 +150,12 @@ class NullVisualEmbedder:
         return self._dimension
 
     def embed(self, text: str) -> list[float]:  # pragma: no cover - never called
+        raise NotImplementedError(
+            "visual embedding is disabled (NullVisualEmbedder); inject a real "
+            "visual embedder to enable the visual layer"
+        )
+
+    def embed_to_bytes(self, text: str) -> bytes:  # pragma: no cover - never called
         raise NotImplementedError(
             "visual embedding is disabled (NullVisualEmbedder); inject a real "
             "visual embedder to enable the visual layer"

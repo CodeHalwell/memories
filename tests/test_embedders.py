@@ -62,6 +62,24 @@ def test_callable_embedder_wraps_function():
     assert emb.embed("abc") == [3.0, 1.0]
 
 
+def test_callable_embedder_rejects_wrong_length():
+    # Declares dimension 4 but the function returns 2 -> caught early.
+    emb = CallableTextEmbedder(lambda s: [0.0, 1.0], dimension=4)
+    with pytest.raises(ValueError, match="does not match"):
+        emb.embed("x")
+
+
+def test_null_visual_embedder_embed_to_bytes_refuses():
+    nve = NullVisualEmbedder(dimension=512)
+    with pytest.raises(NotImplementedError):
+        nve.embed_to_bytes("anything")
+
+
+def test_null_visual_embedder_rejects_nonpositive_dimension():
+    with pytest.raises(ValueError):
+        NullVisualEmbedder(dimension=0)
+
+
 def test_invalid_dimension_rejected():
     with pytest.raises(ValueError):
         HashingTextEmbedder(dimension=0)

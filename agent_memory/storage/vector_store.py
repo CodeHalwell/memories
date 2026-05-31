@@ -63,11 +63,28 @@ class VectorStore:
         from qdrant_client.models import Distance, VectorParams
 
         collections = [c.name for c in self.client.get_collections().collections]
-        if name not in collections:
-            self.client.create_collection(
-                collection_name=name,
-                vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
-            )
+        if name in collections:
+            # Guard against reopening a data directory with an embedder whose
+            # output dimension differs from the existing collection. Qdrant would
+            # otherwise silently reject upserts/searches and semantic retrieval
+            # would degrade with only swallowed errors. Fail clearly instead.
+            try:
+                existing_dim = self.client.get_collection(name).config.params.vectors.size
+            except Exception:
+                existing_dim = None
+            if existing_dim is not None and existing_dim != dim:
+                raise ValueError(
+                    f"Vector collection '{name}' was created with dimension "
+                    f"{existing_dim}, but the configured embedder produces dimension "
+                    f"{dim}. The embedding provider/model changed for an existing "
+                    f"data directory. Use a fresh data directory, or an embedder "
+                    f"whose dimension is {existing_dim}."
+                )
+            return
+        self.client.create_collection(
+            collection_name=name,
+            vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
+        )
 
     # ── Text embeddings ──
 

@@ -63,7 +63,9 @@ def _content_text(content: Any) -> str:
             if isinstance(block, str):
                 parts.append(block)
             elif isinstance(block, dict) and block.get("type") == "text":
-                parts.append(block.get("text", ""))
+                text_val = block.get("text")
+                if isinstance(text_val, str):
+                    parts.append(text_val)
         return " ".join(p for p in parts if p)
     return str(content)
 
@@ -98,13 +100,30 @@ class AgentMemory(Memory):
     async def add(
         self, content: MemoryContent, cancellation_token: Any = None,
     ) -> None:
-        """Record a memory. Role/turn may be supplied via ``content.metadata``."""
+        """Record a memory. Role/turn may be supplied via ``content.metadata``.
+
+        Metadata values are extracted defensively so an explicit ``None`` (or a
+        non-coercible ``turn``) falls back to the default rather than raising.
+        """
         metadata = content.metadata or {}
+
+        session_val = metadata.get("session_id")
+        session_id = str(session_val) if session_val is not None else self._session_id
+
+        turn_val = metadata.get("turn")
+        try:
+            turn = int(turn_val) if turn_val is not None else 0
+        except (TypeError, ValueError):
+            turn = 0
+
+        role_val = metadata.get("role")
+        role = str(role_val) if role_val is not None else "assistant"
+
         await self._service.save_turn(
             content=_content_text(content.content),
-            session_id=str(metadata.get("session_id", self._session_id)),
-            turn=int(metadata.get("turn", 0)),
-            role=str(metadata.get("role", "assistant")),
+            session_id=session_id,
+            turn=turn,
+            role=role,
             namespace=self._namespace,
         )
 
@@ -141,6 +160,10 @@ class AgentMemory(Memory):
             return UpdateContextResult(memories=MemoryQueryResult(results=[]))
 
         query_text = _content_text(getattr(messages[-1], "content", ""))
+        if not query_text.strip():
+            # Nothing to query on (e.g. an empty or purely non-text message);
+            # avoid a pointless retrieval/embedding round-trip.
+            return UpdateContextResult(memories=MemoryQueryResult(results=[]))
         result = await self.query(query_text)
 
         if result.results:

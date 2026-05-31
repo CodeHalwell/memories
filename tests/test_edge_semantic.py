@@ -47,6 +47,30 @@ async def test_semantic_layer_works_without_torch(manager):
     assert isinstance(results, list)
 
 
+async def test_reopen_with_different_dimension_fails_clearly(tmp_path):
+    """Reopening a data dir with a different embedder dimension must raise a
+    clear error rather than silently degrading semantic retrieval."""
+    from agent_memory import HashingTextEmbedder, MemoryManager, NullVisualEmbedder
+
+    mgr = MemoryManager(
+        data_dir=tmp_path,
+        text_embedder=HashingTextEmbedder(dimension=256),
+        visual_embedder=NullVisualEmbedder(),
+    )
+    await mgr.initialize(load_embeddings=True)
+    await mgr.close()
+
+    # Same data dir, different text dimension.
+    mgr2 = MemoryManager(
+        data_dir=tmp_path,
+        text_embedder=HashingTextEmbedder(dimension=384),
+        visual_embedder=NullVisualEmbedder(),
+    )
+    with pytest.raises(ValueError, match="dimension"):
+        await mgr2.initialize(load_embeddings=True)
+    await mgr2.close()
+
+
 async def test_vector_collection_is_populated(manager):
     mem = await manager.process_turn(
         session_id="s1", turn=1, content="apples bananas cherries",
