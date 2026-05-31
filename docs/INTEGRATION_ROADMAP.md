@@ -78,10 +78,16 @@
     one-call `handle_turn`. No platform dependency — the reusable core for
     Discord/Slack/Telegram/web bindings. Re-exported from
     `agent_memory.integrations`.
-  - **Not yet:** chat-history/memory halves of §3.2, more framework adapters
-    (CrewAI/AutoGen), concrete platform bindings (Discord/Slack), edge/Rust
-    build (§4.2+), store scale-out (§5.3).
-  - Tests: 148 passing.
+  - ✅ **§3.2 AutoGen adapter** — `agent_memory/integrations/autogen.py`
+    implements AutoGen's async `Memory` interface (`add` / `query` /
+    `update_context` / `clear` / `close`) over `MemoryService`. `update_context`
+    injects recalled memories as a `SystemMessage`; `clear`/`close` are no-ops
+    (durable store, caller-owned lifecycle). Extra: `autogen`. Completes the
+    major Python agent frameworks (LangChain, LlamaIndex, AutoGen).
+  - **Not yet:** chat-history halves of LangChain/LlamaIndex §3.2, CrewAI,
+    concrete platform bindings (Discord/Slack), edge/Rust build (§4.2+), store
+    scale-out (§5.3).
+  - Tests: 153 passing.
 
 ---
 

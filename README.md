@@ -237,6 +237,22 @@ retriever = AgentMemoryRetriever(service, namespace="user-42")
 nodes = await retriever.aretrieve("what does the user like?")   # -> list[NodeWithScore]
 ```
 
+### AutoGen
+
+An implementation of AutoGen's `Memory` interface — `update_context` injects
+relevant memories into the model context before each model call:
+
+```bash
+pip install -e ".[autogen]"
+```
+
+```python
+from agent_memory.integrations.autogen import AgentMemory
+
+memory = AgentMemory(service, namespace="user-42")
+# pass to an AutoGen agent: AssistantAgent(..., memory=[memory])
+```
+
 > Both retrievers are **async-native** — use `ainvoke` / `aretrieve`. The
 > synchronous APIs raise, because the underlying store is bound to the event
 > loop it was initialized on.

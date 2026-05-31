@@ -12,11 +12,12 @@ and pulls in its own optional dependency only when used:
   ``langchain``).
 - ``llamaindex`` — a LlamaIndex ``BaseRetriever`` + message helpers (extra:
   ``llamaindex``).
+- ``autogen`` — an AutoGen ``Memory`` implementation (extra: ``autogen``).
 
 The framework adapters are not re-exported here because importing them requires
-their framework package (a retriever is defined by subclassing); import them
+their framework package (they subclass a framework base class); import them
 directly from ``agent_memory.integrations.langchain`` /
-``agent_memory.integrations.llamaindex``.
+``agent_memory.integrations.llamaindex`` / ``agent_memory.integrations.autogen``.
 
 The ``mcp_server`` and ``rest_server`` modules import their transport deps
 lazily, so they remain importable on the core profile.
