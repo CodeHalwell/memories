@@ -22,6 +22,13 @@ never need their extra installed. See ``pyproject.toml`` for the extras matrix.
 
 from agent_memory.config import MEMORY_CONFIG
 from agent_memory.core.memory_manager import MemoryManager
+from agent_memory.embeddings.base import (
+    CallableTextEmbedder,
+    HashingTextEmbedder,
+    NullVisualEmbedder,
+    TextEmbedderProtocol,
+    VisualEmbedderProtocol,
+)
 from agent_memory.models import (
     CompactionResult,
     DiscoveredEdge,
@@ -42,5 +49,11 @@ __all__ = [
     "MergeValidation",
     "DiscoveredEdge",
     "MEMORY_CONFIG",
+    # Pluggable embedder providers (Protocols + torch-free implementations).
+    "TextEmbedderProtocol",
+    "VisualEmbedderProtocol",
+    "HashingTextEmbedder",
+    "CallableTextEmbedder",
+    "NullVisualEmbedder",
     "__version__",
 ]

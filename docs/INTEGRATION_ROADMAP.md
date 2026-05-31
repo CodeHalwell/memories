@@ -59,6 +59,23 @@
     platform connectors (§5.2), store scale-out (§5.3).
   - Tests: 130 passing (2 framework-extra guard tests skip when uninstalled).
 
+- **2026-05-31 — Phase 0 completed + edge semantic story:**
+  - ✅ **§2.3 Provider Protocols** — `agent_memory/embeddings/base.py` defines
+    `TextEmbedderProtocol` / `VisualEmbedderProtocol`; `MemoryManager` and
+    `MemoryService` accept injected embedders. Formalizes the seam created by
+    the dependency-tiering work.
+  - ✅ **§4.1 torch-free semantic layer** — bundled `HashingTextEmbedder`
+    (offline, deterministic), `CallableTextEmbedder` (wrap ONNX/remote), and
+    `NullVisualEmbedder` (text-only). The edge profile can now run the full
+    Qdrant vector path **without torch/sentence-transformers/CLIP** — verified
+    by an integration test that runs with torch absent.
+  - This closes the Phase 0 foundations (public API, dependency tiering,
+    namespacing, provider Protocols).
+  - **Not yet:** chat-history/memory halves of §3.2, more framework adapters
+    (CrewAI/AutoGen), edge/Rust build (§4.2+), platform connectors (§5.2),
+    store scale-out (§5.3).
+  - Tests: 141 passing.
+
 ---
 
 ## 1. Where the project stands today

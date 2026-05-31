@@ -131,6 +131,27 @@ manager = MemoryManager()
 await manager.initialize(load_embeddings=False)   # no torch / no sentence-transformers
 ```
 
+### Pluggable embedders (torch-free semantic search)
+
+Embedders are injected through small `Protocol`s (`TextEmbedderProtocol` /
+`VisualEmbedderProtocol`), so you can keep the semantic vector layer **without
+torch** by supplying a lightweight embedder. Bundled implementations:
+
+- `HashingTextEmbedder` — offline, deterministic lexical embeddings (no deps).
+- `CallableTextEmbedder` — wrap any `str -> sequence[float]` function (ONNX, a
+  remote embeddings API, …).
+- `NullVisualEmbedder` — disable the visual layer for text-only deployments.
+
+```python
+from agent_memory import MemoryManager, HashingTextEmbedder, NullVisualEmbedder
+
+manager = MemoryManager(
+    text_embedder=HashingTextEmbedder(dimension=256),
+    visual_embedder=NullVisualEmbedder(),
+)
+await manager.initialize()        # full semantic (Qdrant) path, no torch/CLIP
+```
+
 ## Multi-tenancy
 
 Every operation accepts an optional `namespace` (default `"default"`) that
