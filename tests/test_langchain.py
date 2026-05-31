@@ -77,3 +77,34 @@ async def test_arecord_plain_string(service):
 
     result = await arecord_message(service, "a plain string note", session_id="s1", turn=1, namespace="u1")
     assert result["saved"] is True
+
+
+async def test_sync_retrieval_raises(service):
+    from agent_memory.integrations.langchain import AgentMemoryRetriever
+
+    retriever = AgentMemoryRetriever(service=service, namespace="u1")
+    with pytest.raises(RuntimeError, match="async-native"):
+        retriever._get_relevant_documents("q", run_manager=None)
+
+
+def test_generic_chat_message_role_preserved():
+    from langchain_core.messages import ChatMessage
+
+    from agent_memory.integrations.langchain import _message_role
+
+    # Generic ChatMessage has type "chat"; its explicit role must be preserved.
+    assert _message_role(ChatMessage(role="user", content="hi")) == "user"
+    assert _message_role(ChatMessage(role="system", content="hi")) == "system"
+
+
+def test_multimodal_content_extracts_text():
+    from langchain_core.messages import HumanMessage
+
+    from agent_memory.integrations.langchain import _message_role, _message_text
+
+    msg = HumanMessage(content=[
+        {"type": "text", "text": "describe this"},
+        {"type": "image_url", "image_url": {"url": "http://x/y.png"}},
+    ])
+    assert _message_text(msg) == "describe this"
+    assert _message_role(msg) == "user"

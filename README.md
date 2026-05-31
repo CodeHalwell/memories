@@ -206,11 +206,19 @@ pip install -e ".[llamaindex]"
 ```
 
 ```python
+from agent_memory.service import MemoryService
 from agent_memory.integrations.llamaindex import AgentMemoryRetriever
+
+service = MemoryService(load_embeddings=False)
+await service.initialize()
 
 retriever = AgentMemoryRetriever(service, namespace="user-42")
 nodes = await retriever.aretrieve("what does the user like?")   # -> list[NodeWithScore]
 ```
+
+> Both retrievers are **async-native** — use `ainvoke` / `aretrieve`. The
+> synchronous APIs raise, because the underlying store is bound to the event
+> loop it was initialized on.
 
 For programmatic/out-of-process use, `agent_memory.service.MemoryService`
 provides the same verbs as transport-agnostic, dict-in/dict-out `async` methods

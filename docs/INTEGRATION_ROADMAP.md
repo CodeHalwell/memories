@@ -36,20 +36,28 @@
   - Tests: 117 passing (guard tests for the `mcp`/`server` extras skip when the
     extra is installed).
 
-- **2026-05-31 — Phase 2 (framework adapters):**
-  - ✅ **§3.2 LangChain adapter** — `agent_memory/integrations/langchain.py`
-    provides `AgentMemoryRetriever` (a `BaseRetriever` returning `Document`s from
-    the multi-layer, namespace-scoped retrieval) plus `arecord_message` to
-    persist LangChain messages as memories (extra: `langchain`). Built on the
-    shared `MemoryService`; namespace isolation verified through the adapter.
-  - ✅ **§3.2 LlamaIndex adapter** — `agent_memory/integrations/llamaindex.py`
-    provides a LlamaIndex `BaseRetriever` returning scored `NodeWithScore`s
-    (descending rank score), plus `arecord_message` for `ChatMessage`s (extra:
-    `llamaindex`). Same `MemoryService` backing; namespace isolation verified.
-  - **Not yet:** provider Protocols (§2.3), more framework adapters (CrewAI/
-    AutoGen, §3.2), edge/Rust build (§4.2+), platform connectors (§5.2), store
-    scale-out (§5.3).
-  - Tests: 125 passing.
+- **2026-05-31 — Phase 2 (framework adapters), retriever-first slice:**
+  - 🟡 **§3.2 LangChain adapter (retriever + recording helper)** —
+    `agent_memory/integrations/langchain.py` provides `AgentMemoryRetriever`
+    (a `BaseRetriever` returning `Document`s from the multi-layer,
+    namespace-scoped retrieval) plus `arecord_message` to persist LangChain
+    messages as memories (extra: `langchain`). Built on the shared
+    `MemoryService`; namespace isolation verified. **Still to do for full §3.2:**
+    a `BaseChatMessageHistory` implementation.
+  - 🟡 **§3.2 LlamaIndex adapter (retriever + recording helper)** —
+    `agent_memory/integrations/llamaindex.py` provides a LlamaIndex
+    `BaseRetriever` returning scored `NodeWithScore`s (descending rank score),
+    plus `arecord_message` for `ChatMessage`s (extra: `llamaindex`). Namespace
+    isolation verified. **Still to do for full §3.2:** a `BaseMemory`
+    implementation.
+  - Both retrievers are async-native; the synchronous APIs raise (the store is
+    bound to the loop it was initialized on) rather than spinning a new loop.
+    `arecord_message` extracts text from multi-modal (block-list) content and
+    preserves explicit roles on generic chat messages.
+  - **Not yet:** chat-history/memory halves of §3.2 above, provider Protocols
+    (§2.3), more framework adapters (CrewAI/AutoGen), edge/Rust build (§4.2+),
+    platform connectors (§5.2), store scale-out (§5.3).
+  - Tests: 130 passing (2 framework-extra guard tests skip when uninstalled).
 
 ---
 

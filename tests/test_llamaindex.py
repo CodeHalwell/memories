@@ -79,3 +79,34 @@ async def test_arecord_plain_string(service):
 
     result = await arecord_message(service, "a plain string fact", session_id="s1", turn=1, namespace="u1")
     assert result["saved"] is True
+
+
+async def test_sync_retrieval_raises(service):
+    from llama_index.core.schema import QueryBundle
+
+    from agent_memory.integrations.llamaindex import AgentMemoryRetriever
+
+    retriever = AgentMemoryRetriever(service, namespace="u1")
+    with pytest.raises(RuntimeError, match="async-native"):
+        retriever._retrieve(QueryBundle(query_str="q"))
+
+
+async def test_multimodal_content_extracts_text(service):
+    from agent_memory.integrations.llamaindex import arecord_message
+
+    class _MultiModalMessage:
+        role = "user"
+        content = [
+            {"type": "text", "text": "look at this chart"},
+            {"type": "image", "image": "..."},
+        ]
+
+    result = await arecord_message(service, _MultiModalMessage(), session_id="s1", turn=1, namespace="u1")
+    assert result["saved"] is True
+
+    from agent_memory.integrations.llamaindex import AgentMemoryRetriever
+
+    nodes = await AgentMemoryRetriever(service, namespace="u1").aretrieve("chart")
+    # The text block is persisted; the raw list repr is not.
+    assert any("look at this chart" in n.node.text for n in nodes)
+    assert not any("image" in n.node.text and "[{" in n.node.text for n in nodes)

@@ -27,7 +27,6 @@ Example::
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Optional
 
 try:
@@ -46,13 +45,50 @@ except ImportError as exc:  # pragma: no cover - dependency guard
 
 from agent_memory.service import MemoryService
 
-# LangChain message type -> memory role.
+# LangChain message type -> memory role. Generic ``ChatMessage`` (type "chat")
+# carries its role separately and is handled in ``_message_role`` below.
 _ROLE_BY_MESSAGE_TYPE = {
     "human": "user",
     "ai": "assistant",
     "system": "system",
     "tool": "tool",
+    "function": "tool",
 }
+
+
+def _message_text(message: Any) -> str:
+    """Extract plain text from a LangChain message (or string).
+
+    LangChain message ``content`` may be a string or a list of content blocks
+    (multi-modal: text/image/etc.). Concatenate the text blocks so we never
+    persist a raw ``repr`` of the block list.
+    """
+    content = getattr(message, "content", message)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+        return " ".join(p for p in parts if p)
+    return str(content)
+
+
+def _message_role(message: Any) -> str:
+    """Resolve a memory role from a LangChain message.
+
+    Specialized classes are mapped by ``.type``; the generic ``ChatMessage``
+    (``.type == "chat"``) carries an explicit ``.role`` string, which is used
+    directly so user/custom roles are preserved rather than defaulting.
+    """
+    msg_type = getattr(message, "type", None)
+    if msg_type == "chat":
+        role = getattr(message, "role", None)
+        return role if role else "assistant"
+    return _ROLE_BY_MESSAGE_TYPE.get(msg_type, "assistant")
 
 
 def _memory_dict_to_document(mem: dict[str, Any]) -> Document:
@@ -97,15 +133,13 @@ class AgentMemoryRetriever(BaseRetriever):
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun,
     ) -> list[Document]:
-        # The memory system is async-native. Synchronous retrieval is supported
-        # only outside a running event loop; inside one, use ``ainvoke``.
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(self._aretrieve_documents(query))
+        # The memory system is async-native: MemoryService's aiosqlite
+        # connection is bound to the event loop it was initialized on, so
+        # spinning a fresh loop here (asyncio.run) would fail at runtime.
+        # Synchronous retrieval is therefore unsupported — use the async API.
         raise RuntimeError(
-            "AgentMemoryRetriever is async-native; call `await retriever.ainvoke(...)` "
-            "in an async context instead of the synchronous API."
+            "AgentMemoryRetriever is async-native and does not support synchronous "
+            "retrieval. Use the async API: `await retriever.ainvoke(...)`."
         )
 
 
@@ -122,12 +156,7 @@ async def arecord_message(
     The memory system decides whether the content is worth saving. Returns the
     :meth:`MemoryService.save_turn` result.
     """
-    content = getattr(message, "content", message)
-    if not isinstance(content, str):
-        content = str(content)
-    msg_type = getattr(message, "type", None)
-    role = _ROLE_BY_MESSAGE_TYPE.get(msg_type, "assistant")
     return await service.save_turn(
-        content=content, session_id=session_id, turn=turn,
-        role=role, namespace=namespace,
+        content=_message_text(message), session_id=session_id, turn=turn,
+        role=_message_role(message), namespace=namespace,
     )

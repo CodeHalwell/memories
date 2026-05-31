@@ -26,7 +26,6 @@ Example::
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any, List, Optional
 
 try:
@@ -105,15 +104,13 @@ class AgentMemoryRetriever(BaseRetriever):
         return await self._aretrieve_query(query_bundle.query_str)
 
     def _retrieve(self, query_bundle: QueryBundle) -> List[NodeWithScore]:
-        # The memory system is async-native. Synchronous retrieval is supported
-        # only outside a running event loop; inside one, use ``aretrieve``.
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            return asyncio.run(self._aretrieve_query(query_bundle.query_str))
+        # The memory system is async-native: MemoryService's aiosqlite
+        # connection is bound to the event loop it was initialized on, so
+        # spinning a fresh loop here (asyncio.run) would fail at runtime.
+        # Synchronous retrieval is therefore unsupported — use the async API.
         raise RuntimeError(
-            "AgentMemoryRetriever is async-native; call `await retriever.aretrieve(...)` "
-            "in an async context instead of the synchronous API."
+            "AgentMemoryRetriever is async-native and does not support synchronous "
+            "retrieval. Use the async API: `await retriever.aretrieve(...)`."
         )
 
 
@@ -131,7 +128,17 @@ async def arecord_message(
     :meth:`MemoryService.save_turn` result.
     """
     content = getattr(message, "content", message)
-    if not isinstance(content, str):
+    if isinstance(content, list):
+        # Multi-modal content: a list of blocks. Keep only the text blocks
+        # rather than persisting a raw repr of the list.
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(block.get("text", ""))
+        content = " ".join(p for p in parts if p)
+    elif not isinstance(content, str):
         content = str(content)
     role_attr = getattr(message, "role", None)
     # role may be a MessageRole enum; normalise via its string value.
