@@ -107,7 +107,7 @@ MEMORY_CONFIG = {
     # "auto" = MiniLM cross-encoder when the local sentence-transformers
     # embedder is in use (full profile), none otherwise; None disables; any
     # other value names a cross-encoder model. On LoCoMo it raised evidence
-    # recall@1 from ~0.31 to ~0.49 (see docs/EVALUATION.md).
+    # recall@1 from 0.30 (best first stage) to 0.46 (see docs/EVALUATION.md).
     "reranker_model": "auto",
 
     # Dream exploration (A3)

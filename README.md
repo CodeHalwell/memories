@@ -46,7 +46,8 @@ raw-history baseline on a public benchmark — see
   graph neighbours of the top results (`graph`), and optionally ripgrep
   (`grep`) and CLIP (`visual`).
 - **Reranking** — a cross-encoder rescoring the fused top 50; on by default
-  on the full local-model profile. On LoCoMo this was the largest single gain.
+  on the full local-model profile. On LoCoMo it was the largest single gain
+  (evidence recall@1 0.30 → 0.46, recall@5 0.52 → 0.67).
 - **Recency, importance and mood** are tie-breakers on top of relevance, so
   decay can reorder near-equals but never hides a relevant memory.
 - **Time filters** (`since`/`until`) and dated context lines for the reader.
