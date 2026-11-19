@@ -173,6 +173,28 @@ How well each automatic label source agrees with the annotated evidence:
   far more of the store; combined with reranked replay it is as good as
   reranked replay alone in this run.
 
+### Does the promotion gate make the right call?
+
+The gate compares models using the same automatic labels they were trained
+on, so with biased labels it could in principle promote a model that is worse
+in truth. The experiment checks this directly: decisions in time order, train
+on the oldest 75%, run the production gate on the newest 25% (the last two
+conversations, about 1,150 turns), then compare its verdict with the annotated
+evidence.
+
+| Label source | Gate promotes? | Evidence F2, learned vs deployed | Verdict |
+|---|---|---|---|
+| BM25 replay, rank 1 | no | 0.609 vs 0.707 | correct (learned is worse) |
+| BM25 replay, rank 5 | no | 0.621 vs 0.707 | correct (learned is worse) |
+| **Reranked replay, rank 1** (default) | **yes** | 0.713 vs 0.707 | correct |
+| Reranked replay, rank 2 | no | 0.718 vs 0.707 | conservative miss |
+| Attribution + reranked rank 1 | no | 0.714 vs 0.707 | conservative miss |
+
+No worse model was promoted; the two errors kept the deployed policy where a
+slightly better model was available. This is one split of one benchmark, so it
+is evidence the gate errs on the safe side, not proof; the `"auto"` training
+default is a second safeguard.
+
 ### Defaults chosen from this
 
 - `outcome_useful_rank = 1` — the most precise labels.
