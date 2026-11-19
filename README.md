@@ -364,9 +364,9 @@ per manager with `MemoryManager(config={...})`. Key settings:
 | `keyword_overlap_merge_threshold` | 0.6 | Keyword overlap to consider merging |
 | `merge_min_answer_preservation` | 1.0 | Fraction of generated answers a merge must keep |
 | `save_outcome_lookback_days` | 14 | Unused decisions are labelled not-useful after this |
-| `outcome_useful_rank` | 5 | Replay rank that counts as "needed" |
+| `outcome_useful_rank` | 1 | Replay rank that counts as "needed" |
 | `policy_min_save_examples` | 1000 | Labelled decisions needed before training |
-| `policy_auto_train` | `True` | Train (and maybe promote) during the sleep cycle |
+| `policy_auto_train` | `"auto"` | Train (and maybe promote) in the sleep cycle when a reranker labels outcomes |
 
 ## Testing
 

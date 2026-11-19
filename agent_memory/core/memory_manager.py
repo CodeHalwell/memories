@@ -462,7 +462,10 @@ class MemoryManager:
             except Exception:
                 logger.exception("Outcome assessment failed")
 
-        if self.config.get("policy_auto_train"):
+        auto_train = self.config.get("policy_auto_train")
+        if auto_train == "auto":
+            auto_train = self.reranker is not None
+        if auto_train:
             try:
                 from agent_memory.policy.training import should_retrain
 

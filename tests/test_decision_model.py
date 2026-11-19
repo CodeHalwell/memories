@@ -149,12 +149,18 @@ async def test_record_response_marks_used_items(lite_manager):
 
 async def test_train_policy_end_to_end_writes_candidate_and_audit(lite_manager):
     rng = random.Random(1)
+    names = []
     for i in range(60):
-        text = (f"My colleague number {i} works in Leeds on project {i}" if rng.random() < 0.5
-                else "ok thanks")
+        if rng.random() < 0.5:
+            name = f"codename{i}x"
+            names.append(name)
+            text = f"My colleague {name} works in Leeds on the {name} project"
+        else:
+            text = "ok thanks"
         await lite_manager.process_turn(f"s{i}", 1, "hi")
         await lite_manager.process_turn(f"s{i}", 2, text)
-    await lite_manager.retrieve("colleague works Leeds project")
+    for name in names:  # later questions, one per colleague
+        await lite_manager.retrieve(f"where does {name} work?")
     await assess_save_outcomes(lite_manager.sqlite, lookback_days=0, config=lite_manager.config)
     lite_manager.config["policy_min_class_examples"] = 5
     report = await train_save_policy(
@@ -164,3 +170,28 @@ async def test_train_policy_end_to_end_writes_candidate_and_audit(lite_manager):
     assert report.model_path and json.loads(open(report.model_path).read())["feature_names"]
     run = await lite_manager.sqlite.last_policy_training_run()
     assert run is not None and run["promoted"] == int(report.promoted)
+
+
+async def test_auto_training_requires_reranked_labels(tmp_path):
+    """policy_auto_train="auto" trains in the sleep cycle only with a reranker."""
+    from agent_memory import CallableReranker, MemoryManager
+
+    async def cycle(path, reranker):
+        mgr = MemoryManager(
+            data_dir=path, reranker=reranker,
+            config={"llm_enabled": False, "policy_min_save_examples": 1,
+                    "save_outcome_lookback_days": 0},
+        )
+        await mgr.initialize(load_embeddings=False)
+        try:
+            await mgr.process_turn("s1", 0, "hi")
+            await mgr.process_turn("s1", 1, "my locker code is 4471")
+            await mgr.retrieve("locker code")
+            await mgr.run_compaction()
+            return await mgr.sqlite.last_policy_training_run()
+        finally:
+            await mgr.close()
+
+    assert await cycle(tmp_path / "plain", None) is None
+    overlap = CallableReranker(lambda q, docs: [float(len(set(q.split()) & set(d.split()))) for d in docs])
+    assert await cycle(tmp_path / "reranked", overlap) is not None

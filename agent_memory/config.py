@@ -121,10 +121,12 @@ MEMORY_CONFIG = {
     "policy_logging_enabled": True,
     # A decision is labelled useful when its turn ranks in the top
     # `outcome_useful_rank` of the raw index for a later query in the same
-    # namespace, or when usage attribution marks it as used. Unused decisions
-    # are labelled not-useful once older than this window.
+    # namespace (reranked when a reranker is configured), or when usage
+    # attribution marks it as used. Unused decisions are labelled not-useful
+    # once older than this window. Rank 1 gave the most precise labels on
+    # LoCoMo (precision 0.69 with reranking; see docs/DECISION_MODEL.md).
     "save_outcome_lookback_days": 14,
-    "outcome_useful_rank": 5,
+    "outcome_useful_rank": 1,
     "outcome_replay_max_queries": 2000,   # per namespace, per sleep cycle
     "retrieval_outcome_followup_turns": 3,
     "retrieval_outcome_followup_minutes": 10,
@@ -135,7 +137,12 @@ MEMORY_CONFIG = {
     "policy_min_save_examples": 1000,
     "policy_min_retrieval_examples": 500,
     "policy_min_class_examples": 20,
-    "policy_auto_train": True,        # train during the sleep cycle when data allows
+    # Train during the sleep cycle when data allows. "auto" = only when a
+    # reranker produces the replay labels: models trained on plain-BM25 replay
+    # labels scored below the lexical prior on LoCoMo (AUC ~0.71 vs 0.77),
+    # while reranked labels reached 0.80. True/False force it on/off;
+    # train_policy() is always available manually.
+    "policy_auto_train": "auto",
     "policy_promotion_margin": 0.01,  # learned model must beat heuristic F2 by this
     "policy_min_auc": 0.6,
     "policy_fbeta": 2.0,              # recall-weighted: a missed fact costs more

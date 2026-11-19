@@ -117,7 +117,74 @@ count grows by 20%), or on demand with `MemoryManager.train_policy()`.
   and never revise it. Here importance is a learned function of features and
   observed use, revisable every sleep cycle.
 
-## 6. Evidence
+## 6. Evidence (LoCoMo, 10 conversations, 5,882 turns)
 
-_Pending: results from `python -m agent_memory.eval.locomo --experiment
-policy` will be added here._
+`python -m agent_memory.eval.locomo --experiment policy`. Each conversation
+is ingested with the default policy and no LLM (so the deployed policy is the
+lexical prior), every question is asked, and decisions are labelled by the
+system itself — it never sees the evidence annotations. A logistic model is
+trained on the labels of 8 conversations and scored on the other 2 (5-fold),
+against the **annotated evidence turns** (24.2% of all turns).
+
+### Label quality
+
+How well each automatic label source agrees with the annotated evidence:
+
+| Label source | Turns labelled useful | Precision | Recall | F1 |
+|---|---|---|---|---|
+| BM25 replay, rank 1 | 19% | 0.52 | 0.41 | 0.46 |
+| BM25 replay, rank 3 | 42% | 0.40 | 0.69 | 0.50 |
+| BM25 replay, rank 5 | 57% | 0.34 | 0.80 | 0.48 |
+| **Reranked replay, rank 1** | 19% | **0.69** | 0.54 | 0.60 |
+| Reranked replay, rank 2 | 31% | 0.55 | 0.69 | 0.61 |
+| Reranked replay, rank 3 | 40% | 0.47 | 0.79 | 0.59 |
+| Attribution (gold answer as the reply) | 3% | 0.82 | 0.09 | 0.16 |
+| Attribution + reranked rank 1 | 20% | 0.69 | 0.57 | 0.62 |
+
+### Policies, scored against the evidence (held-out conversations)
+
+| Policy | AUC | Save rate | Recall | F2 | Recall at the heuristic's save rate |
+|---|---|---|---|---|---|
+| Lexical prior (deployed) | 0.770 | 71% | 0.933 | 0.672 | — |
+| Learned on BM25 replay, rank 5 | 0.713 | 50% | 0.72 | 0.593 | 0.874 |
+| **Learned on reranked replay, rank 1** | **0.798** | 49% | 0.81 | 0.677 | **0.939** |
+| Learned on attribution + reranked | 0.797 | 50% | 0.82 | 0.681 | 0.941 |
+| Learned on the evidence itself (ceiling) | 0.802 | 50% | 0.83 | 0.687 | 0.943 |
+| Random, same save rate as the prior | — | 72% | 0.70 | 0.504 | — |
+
+### What this shows
+
+- **Label quality decides whether learning helps.** Trained on plain-BM25
+  replay labels, the model is *worse* than the hand-set prior (AUC 0.71 vs
+  0.77). BM25 replay has a systematic bias — questions lexically match later
+  questions — and the learned weights picked it up (`question` +0.27).
+- **Replaying through the cross-encoder fixes it.** Rank-1 reranked labels are
+  the most precise automatic source (0.69), the `question` weight turns
+  negative (−0.15), and the model reaches AUC 0.798 — essentially the ceiling
+  for these features (0.802, trained on the annotated evidence).
+- **The gain is real but modest.** At its own threshold the learned policy
+  matches the prior's F2 while curating 49% of turns instead of 71%; at the
+  prior's save rate it recalls 93.9% of evidence turns against 93.3%. The
+  lexical prior is already near what these features allow; bigger gains need
+  better features (the LLM curator's judgement, which this offline run does
+  not have) more than a better learner.
+- **Attribution is precise but sparse here**, because LoCoMo answers are a few
+  words long. Deployed replies are full sentences, so attribution should cover
+  far more of the store; combined with reranked replay it is as good as
+  reranked replay alone in this run.
+
+### Defaults chosen from this
+
+- `outcome_useful_rank = 1` — the most precise labels.
+- `policy_auto_train = "auto"` — the sleep cycle trains only when a reranker
+  produces the replay labels. Without one, the labels are the kind that made
+  the model worse, so training is left to an explicit `train_policy()` call.
+
+### Limits
+
+- One benchmark of synthetic two-person conversations, where both speakers are
+  human; the `is_user` feature is therefore constant here.
+- No LLM features: in deployment the LLM curator's confidence is a feature and
+  the deployed baseline is the LLM heuristic, not the lexical prior.
+- "Needed later" is proxied by the benchmark's questions. A real agent's query
+  distribution will differ.

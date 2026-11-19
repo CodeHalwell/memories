@@ -59,7 +59,7 @@ async def assess_save_outcomes(
     """
     cfg = config or MEMORY_CONFIG
     window = cfg["save_outcome_lookback_days"] if lookback_days is None else lookback_days
-    rank_cut = cfg.get("outcome_useful_rank", 5)
+    rank_cut = cfg.get("outcome_useful_rank", 1)
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(days=window)
 
