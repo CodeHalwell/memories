@@ -23,7 +23,8 @@ Respond with ONLY valid JSON, no other text. Use this exact schema:
   "arousal": 0.0 to 1.0,
   "surprise": 0.0 to 1.0,
   "summary": "one sentence summary",
-  "salience": 0.0 to 1.0
+  "salience": 0.0 to 1.0,
+  "entities": [{"name": "Canonical Name", "type": "person|place|organisation|object|concept|event"}]
 }
 
 Guidelines:
@@ -34,14 +35,16 @@ Guidelines:
 - Surprise: 0.0 (expected) to 1.0 (completely unexpected)
 - Salience: overall importance/memorability from 0.0 to 1.0
 - Save routine/repetitive outputs with low confidence
-- Save novel insights, decisions, errors, corrections, or user preferences with high confidence."""
+- Save novel insights, decisions, errors, corrections, or user preferences with high confidence.
+- Entities: the people, places, organisations and named things the content is about (up to 8).
+  Use the canonical name, not a pronoun."""
 
-MERGE_SYSTEM = """You are a memory compaction agent. You merge multiple related episodic memories
-into a single generalised semantic memory.
+MERGE_SYSTEM = """You are a memory consolidation agent. You combine several related memories
+into ONE memory that loses no information.
 
 Respond with ONLY valid JSON:
 {
-  "content": "merged memory content — a generalised summary preserving key facts",
+  "content": "combined memory content",
   "summary": "one sentence summary",
   "keywords": [{"keyword": "term", "weight": 0.0-1.0}],
   "valence": -1.0 to 1.0,
@@ -50,19 +53,21 @@ Respond with ONLY valid JSON:
 }
 
 Guidelines:
-- Preserve factual information but collapse redundant detail
-- The merged memory should be more abstract and general than the originals
+- Keep every specific fact: names, numbers, dates, places, quantities, quotes and preferences.
+- Remove only exact repetition. Do NOT generalise, abstract or paraphrase specifics away.
+- If memories disagree, keep both statements and their dates; do not silently pick one.
 - Keyword list should be the union of important keywords from all source memories
 - Emotional scores should reflect the blended tone of the source memories
 - Salience should be the maximum salience of any source memory."""
 
-SYNTHETIC_QUERY_SYSTEM = """Generate search queries that would retrieve the given memory content.
+SYNTHETIC_QUERY_SYSTEM = """Generate questions that the given memory content answers, each with
+its short answer copied from the content.
 
-Respond with ONLY a JSON array of query strings:
-["query 1", "query 2", ...]
+Respond with ONLY a JSON array:
+[{"question": "...", "answer": "..."}, ...]
 
-Generate queries that are natural search terms a user might use to find this information.
-Be specific to the content — generic queries are not useful."""
+- Each answer must be a short span (a name, number, date, place or phrase) that appears in the content.
+- Cover different facts; do not ask generic questions."""
 
 EMOTION_SYSTEM = """You are an emotional context analyser. Score the emotional tone of the given text.
 

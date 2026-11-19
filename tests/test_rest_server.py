@@ -84,3 +84,20 @@ def test_get_memory_and_404(client):
     # Wrong namespace is also a 404 (isolation).
     wrong_ns = client.get(f"/memories/{mem_id}", params={"namespace": "other"})
     assert wrong_ns.status_code == 404
+
+
+def test_feedback_and_delete(client):
+    save = client.post("/memories", json={
+        "content": "The gate code is 4471", "session_id": "s1", "turn": 1, "namespace": "u1",
+    })
+    mem_id = save.json()["memory"]["id"]
+    body = client.post("/retrieve", json={"query": "gate code", "namespace": "u1"}).json()
+    assert body["retrieval_id"]
+    fb = client.post("/feedback", json={"retrieval_id": body["retrieval_id"],
+                                         "response": "The gate code is 4471."})
+    assert fb.status_code == 200 and fb.json()["used"] >= 1
+
+    assert client.delete(f"/memories/{mem_id}", params={"namespace": "other"}).status_code == 404
+    assert client.delete(f"/memories/{mem_id}", params={"namespace": "u1"}).status_code == 200
+    after = client.post("/retrieve", json={"query": "gate code", "namespace": "u1"}).json()
+    assert after["count"] == 0

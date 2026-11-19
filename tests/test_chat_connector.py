@@ -4,6 +4,8 @@ Runs on the lite profile (no extras). Verifies per-user namespace isolation,
 recall/record helpers, the prompt context block, and the one-call handle_turn.
 """
 
+import re
+
 import pytest
 import pytest_asyncio
 
@@ -54,7 +56,8 @@ async def test_context_block_formats_and_is_empty_when_nothing(connector):
     # Lite profile is lexical, so the query overlaps the stored content.
     block = await connector.context_block("alice", "vegetarian meals", header="Known:")
     assert block.startswith("Known:")
-    assert "- I am a vegetarian" in block
+    # Each line carries the event date so the model can reason about time.
+    assert re.search(r"- \[\d{4}-\d{2}-\d{2}\] I am a vegetarian", block)
 
 
 async def test_handle_turn_records_new_user(connector):
@@ -83,3 +86,11 @@ async def test_record_assistant_message(connector):
     res = await connector.record_assistant_message("alice", "The capital of France is Paris", turn=1)
     assert res["saved"] is True
     assert res["memory"]["namespace"] == "chat:alice"
+
+
+async def test_reply_is_attributed_to_the_last_recall(connector):
+    await connector.record_user_message("fay", "My cat is called Biscuit and she is ginger")
+    await connector.recall("fay", "what is my cat called")
+    await connector.record_assistant_message("fay", "Your cat is called Biscuit, the ginger one.", turn=2)
+    used = await connector._service.manager.sqlite.get_used_raw_log_ids("chat:fay")
+    assert used, "the recalled memory should be marked as used by the reply"

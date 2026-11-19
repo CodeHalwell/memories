@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 TEXT_COLLECTION = "memory_text"
 VISUAL_COLLECTION = "memory_visual"
+RAW_COLLECTION = "raw_text"   # every logged turn (curated or not)
 
 
 class VectorStore:
@@ -48,6 +49,7 @@ class VectorStore:
         self._client = QdrantClient(path=str(self.vector_dir))
         self._ensure_collection(TEXT_COLLECTION, text_dim)
         self._ensure_collection(VISUAL_COLLECTION, visual_dim)
+        self._ensure_collection(RAW_COLLECTION, text_dim)
 
     def close(self) -> None:
         if self._client:
@@ -206,6 +208,66 @@ class VectorStore:
             for r in results.points
         ]
 
+    # ── Raw-turn embeddings ──
+
+    def upsert_raw_vector(
+        self, raw_log_id: str, vector: list[float], namespace: str = "default",
+        session_id: str = "", timestamp: str = "",
+    ) -> str:
+        """Embed a raw logged turn (curated or not) for dense raw retrieval."""
+        from qdrant_client.models import PointStruct
+
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"raw:{raw_log_id}"))
+        self.client.upsert(
+            collection_name=RAW_COLLECTION,
+            points=[PointStruct(
+                id=point_id, vector=vector,
+                payload={"raw_log_id": raw_log_id, "namespace": namespace,
+                         "session_id": session_id, "timestamp": timestamp},
+            )],
+        )
+        return point_id
+
+    def search_raw(
+        self, query_vector: list[float], limit: int = 30, namespace: str | None = None,
+    ) -> list[dict]:
+        """Nearest raw turns. Returns dicts: {raw_log_id, score}."""
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+        flt = None
+        if namespace is not None:
+            flt = Filter(must=[FieldCondition(key="namespace", match=MatchValue(value=namespace))])
+        results = self.client.query_points(
+            collection_name=RAW_COLLECTION, query=query_vector, limit=limit, query_filter=flt,
+        )
+        return [{"raw_log_id": r.payload["raw_log_id"], "score": r.score} for r in results.points]
+
+    def delete_raw(self, raw_log_id: str) -> None:
+        self._delete_where(RAW_COLLECTION, "raw_log_id", raw_log_id)
+
+    # ── Neighbours and similarity ──
+
+    def get_vector(self, point_id: str, collection: str = TEXT_COLLECTION) -> list[float] | None:
+        try:
+            points = self.client.retrieve(
+                collection_name=collection, ids=[point_id], with_vectors=True,
+            )
+        except Exception:
+            return None
+        return list(points[0].vector) if points else None
+
+    def nearest_memories(
+        self, point_id: str, limit: int = 5, namespace: str | None = None,
+    ) -> list[dict]:
+        """Nearest memories to an existing point (excluding itself)."""
+        vector = self.get_vector(point_id)
+        if vector is None:
+            return []
+        hits = self.search_text(vector, limit=limit + 1, namespace=namespace)
+        own = self.client.retrieve(collection_name=TEXT_COLLECTION, ids=[point_id])
+        own_mid = own[0].payload.get("memory_id") if own else None
+        return [h for h in hits if h["memory_id"] != own_mid][:limit]
+
     def similarity(self, point_id_a: str, point_id_b: str) -> float | None:
         """Compute cosine similarity between two points in the text collection.
 
@@ -229,13 +291,27 @@ class VectorStore:
         except Exception:
             return None
 
-    def delete_point(self, collection: str, memory_id: str) -> None:
-        """Delete all points for a given memory_id from a collection."""
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
+    # ── Deletion ──
+
+    def _delete_where(self, collection: str, key: str, value: str) -> None:
+        from qdrant_client.models import FieldCondition, Filter, FilterSelector, MatchValue
 
         self.client.delete(
             collection_name=collection,
-            points_selector=Filter(
-                must=[FieldCondition(key="memory_id", match=MatchValue(value=memory_id))]
+            points_selector=FilterSelector(
+                filter=Filter(must=[FieldCondition(key=key, match=MatchValue(value=value))])
             ),
         )
+
+    def delete_point(self, collection: str, memory_id: str) -> None:
+        """Delete all points for a given memory_id from a collection."""
+        self._delete_where(collection, "memory_id", memory_id)
+
+    def delete_memory(self, memory_id: str) -> None:
+        """Delete a memory's text and visual points."""
+        for collection in (TEXT_COLLECTION, VISUAL_COLLECTION):
+            self._delete_where(collection, "memory_id", memory_id)
+
+    def delete_namespace(self, namespace: str) -> None:
+        for collection in (TEXT_COLLECTION, VISUAL_COLLECTION, RAW_COLLECTION):
+            self._delete_where(collection, "namespace", namespace)

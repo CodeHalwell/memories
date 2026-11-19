@@ -26,7 +26,7 @@ graph = ["kuzu>=0.4.0"]                          # embedded graph relationships
 vectors = ["qdrant-client>=1.9.0"]              # embedded vector store
 
 # Integration adapters (Track A/C of the integration roadmap).
-mcp = ["mcp>=1.2.0"]                              # Model Context Protocol server
+mcp = ["mcp>=1.2.0,<2"]                           # Model Context Protocol server (v2 renamed FastMCP)
 server = ["fastapi>=0.110", "uvicorn>=0.29"]     # REST/HTTP service
 langchain = ["langchain-core>=0.3"]              # LangChain retriever + helpers
 llamaindex = ["llama-index-core>=0.11"]          # LlamaIndex retriever + helpers

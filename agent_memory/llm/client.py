@@ -33,6 +33,22 @@ def _get_litellm():
     return _litellm
 
 
+def llm_available(config: dict | None = None) -> bool:
+    """True when LLM calls are enabled in config and ``litellm`` is importable.
+
+    Lets callers skip LLM-dependent steps up front instead of paying for (and
+    logging) a failure on every turn when the ``llm`` extra is absent.
+    """
+    cfg = config or MEMORY_CONFIG
+    if not cfg.get("llm_enabled", True):
+        return False
+    try:
+        _get_litellm()
+    except ImportError:
+        return False
+    return True
+
+
 async def llm_complete(
     prompt: str,
     system: str | None = None,

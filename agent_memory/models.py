@@ -68,8 +68,24 @@ class Memory:
     spatial_embedding: bytes | None = None
     scene_description: str | None = None
 
+    # Speaker of the source turn ("user", "assistant", a participant name, or
+    # "summary" for consolidated memories) and when the remembered event
+    # happened (the source turn's timestamp; created_at is processing time).
+    role: str = "assistant"
+    event_time: str | None = None
+
     # Keywords (not stored in main table — separate table)
     keywords: list[tuple[str, float]] = field(default_factory=list)
+    # Entities named by the memory (written to the graph as MENTIONS edges).
+    entities: list[tuple[str, str]] = field(default_factory=list)
+
+    # ── Transient retrieval fields (never persisted) ──
+    # "memory" for a curated memory, "raw" for an uncurated logged turn
+    # surfaced from the raw-turn index.
+    kind: str = "memory"
+    score: float | None = None
+    matched_layers: list[str] = field(default_factory=list)
+    retrieval_id: str | None = None
 
 
 @dataclass
@@ -85,6 +101,14 @@ class SaveDecision:
     # A2.1 — retrieval gap awareness
     gap_triggered: bool = False
     threshold_used: float | None = None
+    # A5 — decision model provenance. ``features`` are the inputs the policy
+    # saw (logged for training); ``policy_prob`` its save probability;
+    # ``policy_source`` which rule or model decided.
+    namespace: str = "default"
+    role: str = "assistant"
+    policy_prob: float | None = None
+    policy_source: str | None = None
+    features: dict | None = None
 
 
 @dataclass
@@ -109,6 +133,10 @@ class MergeValidation:
     avg_merged_score: float = 0.0
     degradation: float = 0.0
     queries_tested: list[str] = field(default_factory=list)
+    # Answer-preservation check: generated answers that still appear in the
+    # merged text (MEMOIR-style "screen before compress").
+    answers_checked: int = 0
+    answers_preserved: int = 0
 
 
 @dataclass

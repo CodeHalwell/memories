@@ -46,7 +46,9 @@ class TextEmbedder:
 
     @property
     def dimension(self) -> int:
-        return self.model.get_sentence_embedding_dimension()
+        getter = getattr(self.model, "get_embedding_dimension", None) or \
+            self.model.get_sentence_embedding_dimension
+        return getter()
 
     def embed(self, text: str) -> list[float]:
         """Embed a single text string. Returns a list of floats."""

@@ -78,12 +78,19 @@ def create_app(service: "MemoryService | None" = None) -> "FastAPI":
         turn: int = 0
         role: str = "assistant"
         namespace: str = "default"
+        timestamp: str | None = None
 
     class RetrieveRequest(BaseModel):
         query: str
         session_id: str | None = None
         top_k: int | None = None
         namespace: str = "default"
+        since: str | None = None
+        until: str | None = None
+
+    class FeedbackRequest(BaseModel):
+        retrieval_id: str
+        response: str
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
@@ -93,15 +100,28 @@ def create_app(service: "MemoryService | None" = None) -> "FastAPI":
     async def save(req: SaveRequest) -> dict[str, Any]:
         return await svc.save_turn(
             content=req.content, session_id=req.session_id, turn=req.turn,
-            role=req.role, namespace=req.namespace,
+            role=req.role, namespace=req.namespace, timestamp=req.timestamp,
         )
 
     @app.post("/retrieve")
     async def retrieve(req: RetrieveRequest) -> dict[str, Any]:
         return await svc.retrieve(
             query=req.query, session_id=req.session_id, top_k=req.top_k,
-            namespace=req.namespace,
+            namespace=req.namespace, since=req.since, until=req.until,
         )
+
+    @app.post("/feedback")
+    async def feedback(req: FeedbackRequest) -> dict[str, Any]:
+        return await svc.record_response(req.retrieval_id, req.response)
+
+    @app.delete("/memories/{memory_id}")
+    async def delete_memory(
+        memory_id: str, namespace: str = Query("default"), purge_raw: bool = Query(True),
+    ) -> dict[str, Any]:
+        result = await svc.delete_memory(memory_id, namespace=namespace, purge_raw=purge_raw)
+        if not result["deleted"]:
+            raise HTTPException(status_code=404, detail="memory not found")
+        return result
 
     @app.get("/memories/{memory_id}")
     async def get_memory(
