@@ -89,6 +89,30 @@
     scale-out (§5.3).
   - Tests: 153 passing.
 
+- **2026-11-19 — Research review follow-up: correctness, retrieval, decision model, benchmark:**
+  - ✅ **Lifecycle fixes**, each with a test through the real flow: decay now
+    falls with time (compaction was unreachable); compaction, dream
+    exploration and keyword reweighting are namespace-scoped (a merge could
+    combine two tenants' memories into `default`); explicit "remember this"
+    markers and first turns are handled before any LLM call and first-turn
+    detection survives restarts; grep, gap detection and retrieval-outcome
+    labelling work.
+  - ✅ **Raw-turn index** — every turn is BM25-indexed (FTS5) and, with
+    embeddings, dense-indexed, so a skipped turn is still retrievable.
+  - ✅ **Retrieval** — FTS5 over memories (incl. entities), reciprocal-rank
+    fusion, opt-in graph expansion, cross-encoder reranking ("auto" on the
+    full profile), event time and role, time filters, dated context lines.
+  - ✅ **Decision model (A5)** — policy controller with hard rules, features
+    logged per decision, replay/attribution outcome labels for saves *and*
+    skips, numpy logistic model with a promotion gate, sleep-cycle training,
+    `record_response` feedback through service/MCP/REST/ChatConnector.
+  - ✅ **Privacy** — `delete_memory`, `purge_namespace`, per-namespace logs;
+    MCP `memory_delete`, REST `DELETE /memories/{id}`.
+  - ✅ **Benchmark** — `agent_memory.eval.locomo`: LLM-free evidence
+    recall@k and a cross-validated decision-model experiment. Results in
+    `docs/EVALUATION.md`.
+  - The `mcp` extra is pinned below 2.0 (v2 renamed `FastMCP`).
+
 ---
 
 ## 1. Where the project stands today

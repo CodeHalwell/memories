@@ -20,7 +20,7 @@ graph, vectors, LLM) are loaded lazily on first use, so unused capabilities
 never need their extra installed. See ``pyproject.toml`` for the extras matrix.
 """
 
-from agent_memory.config import MEMORY_CONFIG
+from agent_memory.config import MEMORY_CONFIG, make_config
 from agent_memory.core.memory_manager import MemoryManager
 from agent_memory.embeddings.base import (
     CallableTextEmbedder,
@@ -37,6 +37,9 @@ from agent_memory.models import (
     RawLogEntry,
     SaveDecision,
 )
+from agent_memory.policy.controller import PolicyController, PolicyDecision
+from agent_memory.policy.decision_model import LogisticDecisionModel
+from agent_memory.rerank import CallableReranker, CrossEncoderReranker, RerankerProtocol
 
 __version__ = "0.1.0"
 
@@ -49,6 +52,14 @@ __all__ = [
     "MergeValidation",
     "DiscoveredEdge",
     "MEMORY_CONFIG",
+    "make_config",
+    # Decision policy (save decisions) and reranking.
+    "PolicyController",
+    "PolicyDecision",
+    "LogisticDecisionModel",
+    "RerankerProtocol",
+    "CrossEncoderReranker",
+    "CallableReranker",
     # Pluggable embedder providers (Protocols + torch-free implementations).
     "TextEmbedderProtocol",
     "VisualEmbedderProtocol",

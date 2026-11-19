@@ -1,96 +1,121 @@
 # Agent Memory System
 
-A local-first, cognitively-inspired memory system for AI agents. Built on Complementary Learning Systems (CLS) theory, it provides persistent, searchable, and self-organizing memory with emotional modulation, graph-based relationships, and sleep-inspired consolidation.
+A local-first memory system for AI agents. Every turn is logged and searchable;
+a decision policy chooses which turns to *curate* into memories (keywords,
+entities, emotion, graph links); retrieval fuses lexical, dense, entity and
+graph signals; and a sleep cycle deduplicates, consolidates without losing
+facts, labels past decisions by whether they were needed, and trains the
+decision policy from those labels.
+
+The design borrows from Complementary Learning Systems theory (fast episodic
+storage, slow consolidation), but each mechanism is judged against a
+raw-history baseline on a public benchmark — see
+[docs/EVALUATION.md](docs/EVALUATION.md) and
+[docs/DECISION_MODEL.md](docs/DECISION_MODEL.md).
 
 ## Architecture
 
-The system uses four complementary storage layers:
-
 | Layer | Technology | Role |
 |-------|-----------|------|
-| **Raw Logs** | Append-only JSONL | Immutable conversation history with byte-offset indexing |
-| **Metadata** | SQLite (async) | Memory records, access tracking, compaction history, policy decisions |
-| **Graph** | Kuzu (embedded) | Relationships between memories and entities |
-| **Vector** | Qdrant (embedded) | Semantic search via text embeddings, visual search via CLIP |
+| **Raw logs** | Append-only JSONL | Immutable history (per-namespace files) |
+| **Raw-turn index** | SQLite FTS5 (+ optional vectors) | Every turn, curated or not, is retrievable |
+| **Metadata** | SQLite (async) | Memories, keywords, entities, access and decision logs |
+| **Graph** | Kuzu (embedded, optional) | Similarity links, entity mentions, lineage |
+| **Vector** | Qdrant (embedded, optional) | Dense search over memories and raw turns; CLIP visual layer |
 
 ## Features
 
-### Memory Saving
-- **LLM-driven decisions** — Each conversation turn is evaluated by an LLM to decide whether it should be saved as a memory, with structured confidence scoring
-- **Fast-path bypass** — High-arousal or high-surprise events are saved immediately without LLM evaluation
-- **Retrieval gap awareness (A2.1)** — When the system detects a gap in its knowledge (recent retrieval misses), the save threshold is lowered to capture more information in that area
+### Saving: log everything, curate selectively
+- **Every turn is indexed.** A "skip" means *not curated*, never *lost*: the
+  turn stays in the raw-turn index and can be retrieved, labelled and
+  deleted like any other item.
+- **Decision policy** (`agent_memory.policy`). Hard rules first (explicit
+  "remember this" instructions, the first turn of a session, high arousal and
+  surprise), checked before any LLM call. Then the active model: a promoted
+  learned model, the LLM curator's confidence, or — with no LLM — a lexical
+  prior. Every decision is logged with the features the policy saw.
+- **Retrieval gap awareness (A2.1)** — queries that found nothing lower the
+  save threshold for content on that topic.
+- **Entities** extracted by the curator are indexed for search and linked in
+  the graph; similar memories are linked at write time.
 
 ### Retrieval
-- **Three-layer search** — Grep (ripgrep subprocess), keyword (SQLite FTS), and semantic (Qdrant vector similarity) layers run in parallel, results are merged
-- **Graph traversal** — Related memories are discovered via graph walks up to configurable depth
-- **Mood-congruent weighting** — Emotionally similar memories are boosted based on the current emotional context
-- **Decay scoring** — Memory relevance decays over time using an exponential model with recency and frequency components
+- **Layers**, combined with reciprocal-rank fusion: BM25 over curated
+  memories (`keyword`), BM25 over raw turns (`raw`), dense over memories
+  (`semantic`) and raw turns (`raw_semantic`), entity matches (`entity`),
+  graph neighbours of the top results (`graph`), and optionally ripgrep
+  (`grep`) and CLIP (`visual`).
+- **Reranking** — a cross-encoder rescoring the fused top 50; on by default
+  on the full local-model profile. On LoCoMo this was the largest single gain.
+- **Recency, importance and mood** are tie-breakers on top of relevance, so
+  decay can reorder near-equals but never hides a relevant memory.
+- **Time filters** (`since`/`until`) and dated context lines for the reader.
+- **Feedback**: each retrieval returns a `retrieval_id`; `record_response`
+  attributes which items a reply used.
 
-### Emotional Modulation (A2.2)
-- **Arousal and surprise slow decay** — High-arousal or surprising memories decay more slowly, reflecting the psychological finding that emotional events are better remembered
-- **Semantic floor** — Semantic (high-generation) memories never decay below a floor of 0.3, preserving distilled knowledge
+### Decay (A2.2)
+- Recency of last use (or of the event), on a forgetting curve whose
+  half-life grows with each access (spacing effect) and with arousal and
+  surprise. 1.0 when just used. Consolidated memories have a floor.
 
-### Compaction
-- **Keyword-overlap grouping** — Memories sharing sufficient keyword overlap are candidates for merging
-- **Valence exclusion** — Emotionally opposed memories (large valence delta) are never merged together
-- **Generation gap guard (A2.3)** — Only memories within 1 generation of each other can be merged, preventing loss of abstraction hierarchy
-- **Merge validation via generative replay (A2.4)** — Before committing a merge, synthetic queries test whether the merged memory retrieves as well as the originals; merges that degrade retrieval beyond tolerance are rejected
-- **Tiering** — Memories flow through hot → warm → cold tiers based on age, access patterns, and generation
-- **Lineage tracking** — Full `EVOLVED_FROM` graph edges preserve compaction history
+### Sleep cycle (`run_compaction`)
+1. **Refresh** cached decay scores for the current time.
+2. **Deduplicate** near-identical memories within a namespace (no LLM).
+3. **Consolidate** low-value, keyword-overlapping memories within one
+   namespace, only if the merge passes validation (A2.4): generated
+   question/answer pairs must still be answerable from the merged text, and
+   embedding degradation must stay within tolerance (A2.3 generation guard
+   still applies). Sources move to the cold tier with lineage edges.
+4. **Keyword reweighting** from graph connectivity (A2.5), idempotent.
+5. **Dream exploration** (A3): nearest-neighbour bridges between sessions,
+   classified by the LLM.
+6. **Outcome assessment** (A4): label past save/skip decisions by replaying
+   later queries against the raw-turn index, plus usage attribution.
+7. **Policy training** (A5): when enough labels exist, train a logistic model
+   and promote it only if it beats the deployed policy on held-out recent
+   decisions.
 
-### Keyword Reweighting (A2.5)
-- Keywords shared by graph-connected memories are boosted in weight, improving retrieval for strongly related topics
-
-### Dream Exploration (A3)
-- **Random walk strategy** — Semi-random graph traversals discover latent connections between memories from different sessions
-- **Cluster bridge strategy** — Identifies memories at the boundary of semantic clusters and tests cross-cluster connections
-- **Edge commitment** — Discovered relationships are committed to the graph with full logging of exploration runs
-
-### Policy Logging (A4)
-- **Decision-outcome pairing** — Save and retrieval decisions are logged with outcomes to enable future policy learning
-- **Outcome assessment** — Periodic assessment marks whether saved memories were actually useful (accessed) and whether retrievals were helpful (no immediate re-query on same topic)
-- **Training data export** — JSONL export of labeled decision data for future RL-based policy training
-
-### Policy Controller Stub (A5)
-- Heuristic-based controller providing `should_save`, `retrieval_config`, and `compaction_priority` methods
-- Hard constraints enforced: never delete raw logs, never compact fast-path gen-0 memories
-- Designed as a drop-in point for a future learned policy (v2)
+### Privacy
+- `delete_memory(id, purge_raw=True)` and `purge_namespace(ns)` remove data
+  from every store; tenants never share log files.
 
 ### Visual/Spatial Layer
-- **CLIP embeddings** — Images are embedded using OpenCLIP for cross-modal retrieval
-- **Dual-code search** — Text queries can retrieve visual memories and vice versa
+- **CLIP embeddings** of LLM-generated scene descriptions for salient
+  memories (optional `visual` extra).
 
 ## Project Structure
 
 ```
 agent_memory/
-├── config.py                  # Central configuration
-├── models.py                  # Data models (Memory, SaveDecision, etc.)
+├── config.py                  # Central configuration (+ make_config overrides)
+├── models.py                  # Data models (Memory, SaveDecision, ...)
+├── text.py                    # Tokenisation, stopwords, FTS queries, lexical features
+├── rerank.py                  # Reranker protocol + cross-encoder
 ├── core/
 │   ├── memory_manager.py      # Main orchestrator
-│   ├── save_decision.py       # LLM-driven save logic with gap awareness
-│   ├── retrieval.py           # Three-layer retrieval with mood weighting
-│   ├── compaction.py          # Merge, tier, validate with generative replay
-│   ├── decay.py               # Exponential decay with emotional modulation
+│   ├── save_decision.py       # Rules, LLM evaluation, features -> policy
+│   ├── retrieval.py           # Layers, rank fusion, graph expansion, rerank
+│   ├── compaction.py          # Dedupe, validated consolidation, tiering
+│   ├── decay.py               # Forgetting curve with spacing/emotion
 │   ├── keyword_reweight.py    # Graph-informed keyword boosting
-│   └── dream_explorer.py      # Exploratory graph walks
-├── storage/
-│   ├── jsonl_log.py           # Immutable JSONL log with byte-offset index
-│   ├── sqlite_store.py        # Async SQLite for metadata and policy data
-│   ├── graph_store.py         # Kuzu graph for relationships
-│   └── vector_store.py        # Qdrant vectors for semantic search
-├── embeddings/
-│   ├── text_embedder.py       # Sentence-transformer embeddings
-│   └── visual_embedder.py     # CLIP embeddings for images
-├── emotion/
-│   └── scorer.py              # Emotional dimension scoring
-├── llm/
-│   └── client.py              # LiteLLM provider-agnostic inference
-└── policy/
-    ├── controller.py           # Heuristic policy controller (v1)
-    ├── outcome_assessor.py     # Decision-outcome assessment
-    └── export.py               # Training data export
+│   └── dream_explorer.py      # Cross-session association discovery
+├── storage/                   # JSONL, SQLite (+FTS5), Kuzu graph, Qdrant vectors
+├── embeddings/                # Embedder protocols, hashing/callable/ST/CLIP
+├── emotion/scorer.py          # Emotional dimension scoring
+├── llm/client.py              # LiteLLM provider-agnostic inference
+├── policy/
+│   ├── controller.py          # Hard rules + active decision model
+│   ├── decision_model.py      # Features, heuristic and logistic models
+│   ├── outcome_assessor.py    # Replay labels, usage attribution
+│   ├── training.py            # Training, metrics, promotion gate
+│   └── export.py              # Training data export
+├── eval/locomo.py             # LoCoMo retrieval + decision-model benchmark
+└── integrations/              # MCP, REST, LangChain, LlamaIndex, AutoGen, chat
 ```
+
+> The Rust, Go and C# ports under `rust/`, `go/` and `csharp/` predate
+> namespacing, the raw-turn index and the decision model; the Python package
+> is the reference implementation.
 
 ## Installation
 
@@ -123,8 +148,9 @@ pip install -e ".[dev]"      # full + mcp + test tooling
 
 For edge, serverless, or air-gapped targets you can run without the embedding
 stack. Initialize with `load_embeddings=False`: storage and retrieval still
-work, with the semantic/visual layers skipped and retrieval falling back to the
-grep + keyword (incl. content substring) + graph layers.
+work, with the vector layers skipped and retrieval using BM25 over memories and
+raw turns, plus entity and graph layers (the graph is skipped if `kuzu` is not
+installed). With no LLM installed, save decisions use the lexical prior.
 
 ```python
 manager = MemoryManager()
@@ -181,7 +207,8 @@ pip install -e ".[mcp]"      # or ".[lite]" / ".[full]" plus ".[mcp]"
 python -m agent_memory.integrations.mcp_server
 ```
 
-Tools: `memory_save`, `memory_retrieve`, `memory_get`, `memory_compact`.
+Tools: `memory_save`, `memory_retrieve`, `memory_get`, `memory_feedback`,
+`memory_delete`, `memory_compact`.
 Configure via `AGENT_MEMORY_DATA_DIR` and `AGENT_MEMORY_PROFILE` (`full`/`lite`).
 
 ### REST service
@@ -194,7 +221,8 @@ uvicorn agent_memory.integrations.rest_server:app
 ```
 
 Endpoints: `POST /memories`, `POST /retrieve`, `GET /memories/{id}`,
-`POST /compact`, `GET /health` — all namespace-aware, same env config as above.
+`DELETE /memories/{id}`, `POST /feedback`, `POST /compact`, `GET /health` — all
+namespace-aware, same env config as above.
 
 ### LangChain
 
@@ -278,7 +306,9 @@ await connector.record_assistant_message(user_id, reply)
 ```
 
 Each user is isolated in their own namespace; the same pattern backs a Discord,
-Slack, Telegram, or web binding.
+Slack, Telegram, or web binding. Context lines carry the event date, and
+`record_assistant_message` attributes the reply to the preceding recall, which
+is the outcome signal the decision policy learns from.
 
 For programmatic/out-of-process use, `agent_memory.service.MemoryService`
 provides the same verbs as transport-agnostic, dict-in/dict-out `async` methods
@@ -287,56 +317,79 @@ provides the same verbs as transport-agnostic, dict-in/dict-out `async` methods
 ## Usage
 
 ```python
-from agent_memory.core.memory_manager import MemoryManager
+from agent_memory import MemoryManager
 
 manager = MemoryManager()
 await manager.initialize()
 
-# Process a conversation turn
+# Log a turn; the policy decides whether to curate it (it is searchable either way)
 await manager.process_turn(
     session_id="session-001",
-    turn_number=1,
-    content="The user asked about Python async patterns...",
-    emotional_context={"valence": 0.3, "arousal": 0.2},
+    turn=1,
+    content="I moved to Leeds in March and I'm learning the cello.",
+    role="user",
+    namespace="user-42",
+    timestamp="2026-03-14T18:05:00+00:00",   # optional; defaults to now
 )
 
-# Retrieve relevant memories
-results = await manager.retrieve(
-    query="async patterns in Python",
-    emotional_context={"valence": 0.0, "arousal": 0.0},
-)
+# Retrieve (curated memories and raw turns, rank-fused and reranked)
+results = await manager.retrieve("where does the user live?", namespace="user-42")
+for m in results:
+    print(m.kind, m.event_time, m.content)
 
-# Run compaction (includes keyword reweighting, dream exploration, outcome assessment)
+# Tell the system what the answer used (the decision policy learns from this)
+await manager.record_response(results[0].retrieval_id, "You live in Leeds.")
+
+# Sleep cycle: dedupe, consolidate, reweight, dream, label outcomes, train policy
 await manager.run_compaction()
 
-# Clean up
 await manager.close()
 ```
 
 ## Configuration
 
-All settings are in `agent_memory/config.py` via the `MEMORY_CONFIG` dictionary. Key settings:
+Defaults live in `agent_memory/config.py` (`MEMORY_CONFIG`). Pass overrides
+per manager with `MemoryManager(config={...})`. Key settings:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `save_confidence_threshold` | 0.5 | Minimum LLM confidence to save a memory |
-| `fast_path_arousal` | 0.85 | Arousal threshold for fast-path save bypass |
-| `gap_threshold_reduction` | 0.7 | Multiplier applied to save threshold when a retrieval gap is detected |
-| `decay_halflife_days` | 7 | Half-life for memory decay scoring |
-| `keyword_overlap_merge_threshold` | 0.6 | Minimum keyword overlap to consider merging |
-| `max_generation_gap_for_merge` | 1 | Maximum generation gap allowed for merging |
-| `merge_degradation_tolerance` | 0.15 | Maximum retrieval quality degradation allowed for a merge |
-| `dream_walk_count` | 50 | Number of random walks per dream exploration run |
-| `dream_similarity_threshold` | 0.7 | Minimum similarity for a discovered edge |
-| `hot_tier_threshold` | 500 | Hot-tier count that triggers compaction |
+| `llm_enabled` | `True` | Set `False` to run with no LLM calls at all |
+| `retrieval_layers` | keyword, raw, semantic, raw_semantic, entity, graph | Layers fused per query |
+| `retrieval_top_k` | 10 | Results returned |
+| `reranker_model` | `"auto"` | Cross-encoder on the full profile; `None` disables |
+| `recency_weight` / `importance_weight` | 0.02 / 0.01 | Tie-breakers added to fused relevance |
+| `save_confidence_threshold` | 0.5 | LLM-heuristic save threshold |
+| `always_save_first_turn` | `True` | Hard rule (kept for compatibility) |
+| `decay_halflife_days` | 7 | Base half-life; access and emotion lengthen it |
+| `keyword_overlap_merge_threshold` | 0.6 | Keyword overlap to consider merging |
+| `merge_min_answer_preservation` | 1.0 | Fraction of generated answers a merge must keep |
+| `save_outcome_lookback_days` | 14 | Unused decisions are labelled not-useful after this |
+| `outcome_useful_rank` | 5 | Replay rank that counts as "needed" |
+| `policy_min_save_examples` | 1000 | Labelled decisions needed before training |
+| `policy_auto_train` | `True` | Train (and maybe promote) during the sleep cycle |
 
 ## Testing
 
 ```bash
+pip install -e ".[dev]"
 pytest
 ```
 
-93 tests covering all subsystems: storage layers, save decisions, retrieval, compaction, decay, keyword reweighting, dream exploration, policy logging, and policy controller.
+The suite exercises the real save → retrieve → compact flow on the lite and
+edge profiles (no LLM, no torch), with an LLM stub where curation or merging
+needs one.
+
+### Benchmark
+
+```bash
+# download locomo10.json from https://github.com/snap-research/locomo
+python -m agent_memory.eval.locomo --data locomo10.json --embedder minilm
+python -m agent_memory.eval.locomo --data locomo10.json --experiment policy
+```
+
+LLM-free evidence recall@k for each configuration, and a cross-validated
+evaluation of the decision model. Results and discussion:
+[docs/EVALUATION.md](docs/EVALUATION.md).
 
 ## License
 

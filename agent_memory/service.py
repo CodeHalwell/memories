@@ -50,6 +50,8 @@ def memory_to_dict(memory: Memory) -> dict[str, Any]:
         # "memory" for a curated memory, "raw" for an uncurated logged turn.
         "kind": memory.kind,
         "score": memory.score,
+        # Pass to MemoryService.record_response / mark_used after answering.
+        "retrieval_id": memory.retrieval_id,
     }
 
 
