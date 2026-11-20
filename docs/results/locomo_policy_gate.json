@@ -1,0 +1,259 @@
+{
+  "conversations": 10,
+  "embedder": "hashing",
+  "policy": {
+    "turns": 5882,
+    "evidence_rate": 0.2421,
+    "label_quality_vs_evidence": {
+      "replay@1": {
+        "precision": 0.5198,
+        "recall": 0.415,
+        "f1": 0.4615,
+        "fbeta": 0.4615,
+        "save_rate": 0.1933
+      },
+      "replay@5": {
+        "precision": 0.3431,
+        "recall": 0.8041,
+        "f1": 0.481,
+        "fbeta": 0.481,
+        "save_rate": 0.5673
+      },
+      "rerank@1": {
+        "precision": 0.6927,
+        "recall": 0.5351,
+        "f1": 0.6038,
+        "fbeta": 0.6038,
+        "save_rate": 0.187
+      },
+      "rerank@2": {
+        "precision": 0.5476,
+        "recall": 0.6945,
+        "f1": 0.6124,
+        "fbeta": 0.6124,
+        "save_rate": 0.307
+      },
+      "attribution+rerank@1": {
+        "precision": 0.6916,
+        "recall": 0.5653,
+        "f1": 0.6221,
+        "fbeta": 0.6221,
+        "save_rate": 0.1979
+      }
+    },
+    "folds": 5,
+    "policies": {
+      "learned[replay@1]": {
+        "precision": 0.3379,
+        "recall": 0.6924,
+        "f2": 0.5723,
+        "fbeta": 0.5723,
+        "save_rate": 0.4961,
+        "auc": 0.7078,
+        "at_heuristic_rate": {
+          "precision": 0.2993,
+          "recall": 0.882,
+          "f2": 0.6349,
+          "fbeta": 0.6349,
+          "save_rate": 0.7134
+        }
+      },
+      "learned[replay@5]": {
+        "precision": 0.3486,
+        "recall": 0.7184,
+        "f2": 0.5926,
+        "fbeta": 0.5926,
+        "save_rate": 0.499,
+        "auc": 0.713,
+        "at_heuristic_rate": {
+          "precision": 0.2967,
+          "recall": 0.8743,
+          "f2": 0.6293,
+          "fbeta": 0.6293,
+          "save_rate": 0.7134
+        }
+      },
+      "learned[rerank@1]": {
+        "precision": 0.4043,
+        "recall": 0.8146,
+        "f2": 0.6772,
+        "fbeta": 0.6772,
+        "save_rate": 0.4878,
+        "auc": 0.7977,
+        "at_heuristic_rate": {
+          "precision": 0.3186,
+          "recall": 0.9389,
+          "f2": 0.6758,
+          "fbeta": 0.6758,
+          "save_rate": 0.7134
+        }
+      },
+      "learned[rerank@2]": {
+        "precision": 0.401,
+        "recall": 0.8279,
+        "f2": 0.6826,
+        "fbeta": 0.6826,
+        "save_rate": 0.4998,
+        "auc": 0.7925,
+        "at_heuristic_rate": {
+          "precision": 0.3167,
+          "recall": 0.9333,
+          "f2": 0.6718,
+          "fbeta": 0.6718,
+          "save_rate": 0.7134
+        }
+      },
+      "learned[attribution+rerank@1]": {
+        "precision": 0.4025,
+        "recall": 0.8244,
+        "f2": 0.6815,
+        "fbeta": 0.6815,
+        "save_rate": 0.4959,
+        "auc": 0.797,
+        "at_heuristic_rate": {
+          "precision": 0.3194,
+          "recall": 0.941,
+          "f2": 0.6773,
+          "fbeta": 0.6773,
+          "save_rate": 0.7134
+        }
+      },
+      "learned[oracle]": {
+        "precision": 0.4051,
+        "recall": 0.8315,
+        "f2": 0.6869,
+        "fbeta": 0.6869,
+        "save_rate": 0.4969,
+        "auc": 0.8017,
+        "at_heuristic_rate": {
+          "precision": 0.3201,
+          "recall": 0.9431,
+          "f2": 0.6788,
+          "fbeta": 0.6788,
+          "save_rate": 0.7134
+        }
+      },
+      "deployed_lexical_heuristic": {
+        "precision": 0.3167,
+        "recall": 0.9333,
+        "f2": 0.6718,
+        "fbeta": 0.6718,
+        "save_rate": 0.7134,
+        "auc": 0.7697
+      },
+      "random_at_heuristic_rate": {
+        "precision": 0.2371,
+        "recall": 0.7008,
+        "f2": 0.5037,
+        "fbeta": 0.5037,
+        "save_rate": 0.7157,
+        "auc": null
+      }
+    },
+    "best_label_source": "rerank@1",
+    "top_features[best]": [
+      [
+        "n_terms",
+        0.725
+      ],
+      [
+        "first_person_fact",
+        0.268
+      ],
+      [
+        "has_date",
+        0.249
+      ],
+      [
+        "question",
+        -0.145
+      ],
+      [
+        "novelty",
+        0.133
+      ],
+      [
+        "has_number",
+        0.111
+      ],
+      [
+        "log_length",
+        -0.108
+      ],
+      [
+        "turn_position",
+        -0.094
+      ],
+      [
+        "explicit_marker",
+        -0.049
+      ],
+      [
+        "is_first_turn",
+        0.041
+      ]
+    ],
+    "promotion_gate": {
+      "replay@1": {
+        "gate_promotes": false,
+        "gate_fbeta_learned_vs_deployed": [
+          0.5078,
+          0.5512
+        ],
+        "oracle_fbeta_learned_vs_deployed": [
+          0.6094,
+          0.7068
+        ],
+        "promotion_correct": true
+      },
+      "replay@5": {
+        "gate_promotes": false,
+        "gate_fbeta_learned_vs_deployed": [
+          0.598,
+          0.7248
+        ],
+        "oracle_fbeta_learned_vs_deployed": [
+          0.6213,
+          0.7068
+        ],
+        "promotion_correct": true
+      },
+      "rerank@1": {
+        "gate_promotes": true,
+        "gate_fbeta_learned_vs_deployed": [
+          0.6406,
+          0.6231
+        ],
+        "oracle_fbeta_learned_vs_deployed": [
+          0.7134,
+          0.7068
+        ],
+        "promotion_correct": true
+      },
+      "rerank@2": {
+        "gate_promotes": false,
+        "gate_fbeta_learned_vs_deployed": [
+          0.6922,
+          0.7136
+        ],
+        "oracle_fbeta_learned_vs_deployed": [
+          0.7176,
+          0.7068
+        ],
+        "promotion_correct": false
+      },
+      "attribution+rerank@1": {
+        "gate_promotes": false,
+        "gate_fbeta_learned_vs_deployed": [
+          0.6363,
+          0.6475
+        ],
+        "oracle_fbeta_learned_vs_deployed": [
+          0.7137,
+          0.7068
+        ],
+        "promotion_correct": false
+      }
+    }
+  }
+}

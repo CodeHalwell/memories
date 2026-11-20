@@ -50,6 +50,8 @@ class ChatConnector:
         self._service = service
         self._namespace_prefix = namespace_prefix
         self._top_k = top_k
+        # Last retrieval per user, so the reply can be attributed to it.
+        self._last_retrieval: dict[str, str] = {}
 
     # ── Identity mapping ──
 
@@ -79,6 +81,8 @@ class ChatConnector:
             top_k=top_k if top_k is not None else self._top_k,
             namespace=self.namespace_for(user_id),
         )
+        if result.get("retrieval_id"):
+            self._last_retrieval[user_id] = result["retrieval_id"]
         return result["memories"]
 
     async def context_block(
@@ -99,7 +103,11 @@ class ChatConnector:
         if not memories:
             return ""
         lines = [header]
-        lines.extend(f"- {m['content']}" for m in memories)
+        for m in memories:
+            # Dates let the model resolve "when" and "latest" questions; the
+            # LongMemEval ablations put this at roughly +10 points.
+            when = (m.get("event_time") or "")[:10]
+            lines.append(f"- [{when}] {m['content']}" if when else f"- {m['content']}")
         return "\n".join(lines)
 
     # ── Record ──
@@ -116,7 +124,14 @@ class ChatConnector:
     async def record_assistant_message(
         self, user_id: str, text: str, *, session_id: str | None = None, turn: int = 0,
     ) -> dict[str, Any]:
-        """Record an assistant reply as a candidate memory."""
+        """Record an assistant reply, and attribute it to the last recall.
+
+        Attribution marks which recalled memories the reply used — the outcome
+        signal the save-decision model learns from.
+        """
+        retrieval_id = self._last_retrieval.pop(user_id, None)
+        if retrieval_id:
+            await self._service.record_response(retrieval_id, text)
         return await self._service.save_turn(
             content=text, session_id=self._session(user_id, session_id),
             turn=turn, role="assistant", namespace=self.namespace_for(user_id),

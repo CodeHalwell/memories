@@ -45,6 +45,13 @@ def memory_to_dict(memory: Memory) -> dict[str, Any]:
         "surprise": memory.surprise,
         "access_count": memory.access_count,
         "keywords": [kw for kw, _weight in memory.keywords],
+        "role": memory.role,
+        "event_time": memory.event_time,
+        # "memory" for a curated memory, "raw" for an uncurated logged turn.
+        "kind": memory.kind,
+        "score": memory.score,
+        # Pass to MemoryService.record_response / mark_used after answering.
+        "retrieval_id": memory.retrieval_id,
     }
 
 
@@ -95,14 +102,16 @@ class MemoryService:
         turn: int = 0,
         role: str = "assistant",
         namespace: str = "default",
+        timestamp: str | None = None,
     ) -> dict[str, Any]:
-        """Log a conversation turn and let the system decide whether to save it.
+        """Log a conversation turn and let the policy decide whether to curate it.
 
-        Returns ``{"saved": bool, "memory": {...} | None}``.
+        Returns ``{"saved": bool, "memory": {...} | None}``. Unsaved turns are
+        still logged and retrievable as raw evidence.
         """
         memory = await self._manager.process_turn(
             session_id=session_id, turn=turn, content=content, role=role,
-            namespace=namespace,
+            namespace=namespace, timestamp=timestamp,
         )
         return {
             "saved": memory is not None,
@@ -115,16 +124,22 @@ class MemoryService:
         session_id: str | None = None,
         top_k: int | None = None,
         namespace: str = "default",
+        turn: int | None = None,
+        since: str | None = None,
+        until: str | None = None,
     ) -> dict[str, Any]:
-        """Retrieve relevant memories for a query.
+        """Retrieve relevant memories (and raw turns) for a query.
 
-        Returns ``{"query": str, "count": int, "memories": [ {...}, ... ]}``.
+        Returns ``{"query", "retrieval_id", "count", "memories": [...]}``. Pass
+        ``retrieval_id`` to :meth:`record_response` / :meth:`mark_used`.
         """
         memories = await self._manager.retrieve(
             query=query, session_id=session_id, top_k=top_k, namespace=namespace,
+            turn=turn, since=since, until=until,
         )
         return {
             "query": query,
+            "retrieval_id": memories[0].retrieval_id if memories else None,
             "count": len(memories),
             "memories": [memory_to_dict(m) for m in memories],
         }
@@ -137,6 +152,28 @@ class MemoryService:
         memory = await self._manager.get_memory(memory_id, namespace=namespace)
         return memory_to_dict(memory) if memory else None
 
+    async def delete_memory(
+        self, memory_id: str, namespace: str | None = None, purge_raw: bool = False,
+    ) -> dict[str, Any]:
+        """Delete a memory (``purge_raw`` also removes its source turn from the index)."""
+        deleted = await self._manager.delete_memory(
+            memory_id, namespace=namespace, purge_raw=purge_raw,
+        )
+        return {"deleted": deleted, "memory_id": memory_id}
+
+    async def purge_namespace(self, namespace: str) -> dict[str, Any]:
+        """Delete everything stored for a tenant."""
+        return await self._manager.purge_namespace(namespace)
+
+    async def record_response(self, retrieval_id: str, response_text: str) -> dict[str, Any]:
+        """Tell the system what was said using a retrieval's results (outcome signal)."""
+        rows = await self._manager.record_response(retrieval_id, response_text)
+        return {"retrieval_id": retrieval_id, "used": sum(r["used"] for r in rows), "assessed": len(rows)}
+
+    async def mark_used(self, retrieval_id: str, memory_ids: list[str]) -> dict[str, Any]:
+        rows = await self._manager.mark_used(retrieval_id, memory_ids)
+        return {"retrieval_id": retrieval_id, "used": sum(r["used"] for r in rows)}
+
     async def compact(self, trigger: str = "manual") -> dict[str, Any]:
         """Run a compaction/maintenance cycle. Returns a summary of the result."""
         result = await self._manager.run_compaction(trigger=trigger)
@@ -147,4 +184,9 @@ class MemoryService:
             "memories_pruned": result.memories_pruned,
             "keywords_updated": result.keywords_updated,
             "edges_discovered": result.edges_discovered,
+            "notes": result.notes,
         }
+
+    async def train_policy(self, force: bool = False) -> dict[str, Any]:
+        """Train the save-decision model now (promotion is still gated)."""
+        return await self._manager.train_policy(force=force)

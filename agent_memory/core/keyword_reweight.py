@@ -36,15 +36,16 @@ async def reweight_keywords_from_graph(
     if not rows:
         return 0
 
-    # Group by keyword
-    keyword_index: dict[str, list[dict]] = defaultdict(list)
+    # Group by (namespace, keyword): connectivity is measured within a tenant
+    # only, so one tenant's graph never changes another's keyword weights.
+    keyword_index: dict[tuple[str, str], list[dict]] = defaultdict(list)
     for row in rows:
-        keyword_index[row["keyword"]].append(row)
+        keyword_index[(row.get("namespace") or "default", row["keyword"])].append(row)
 
     # Collect all weight updates, then commit in a single batch
     pending_updates: list[tuple[float, str, str]] = []
 
-    for keyword, entries in keyword_index.items():
+    for (_ns, keyword), entries in keyword_index.items():
         if len(entries) < 2:
             continue
 
@@ -52,7 +53,7 @@ async def reweight_keywords_from_graph(
         # Sort to ensure deterministic and meaningful selection:
         #   - higher-weight memories first
         #   - tie-broken by memory_id for stability
-        sorted_entries = sorted(entries, key=lambda e: (-e["weight"], e["memory_id"]))
+        sorted_entries = sorted(entries, key=lambda e: (-e["base_weight"], e["memory_id"]))
         capped_entries = sorted_entries[:max_memories_per_keyword]
         memory_ids = [e["memory_id"] for e in capped_entries]
 
@@ -69,17 +70,14 @@ async def reweight_keywords_from_graph(
             continue
 
         connectivity_ratio = connected_pairs / total_pairs
-
-        # Boost weight for highly connected keywords
-        # Scale: 0.0 connectivity = no change, 1.0 = +50% weight
-        if connectivity_ratio <= 0.0:
-            continue
-
+        # Scale: 0.0 connectivity = base weight, 1.0 = +50%. Computed from the
+        # stored base weight, so repeated cycles are idempotent rather than
+        # ratcheting every weight up to 1.0.
         boost = 1.0 + 0.5 * connectivity_ratio
 
         for entry in capped_entries:
-            new_weight = min(entry["weight"] * boost, 1.0)
-            if new_weight != entry["weight"]:
+            new_weight = round(min(entry["base_weight"] * boost, 1.0), 6)
+            if abs(new_weight - entry["weight"]) > 1e-9:
                 pending_updates.append((new_weight, entry["memory_id"], keyword))
 
     if pending_updates:

@@ -132,16 +132,18 @@ class GraphStore:
         self, from_id: str, to_id: str, weight: float = 1.0,
         relationship_type: str = "supports", created_at: str = "",
     ) -> None:
+        """Create a RELATES_TO edge (idempotent: an existing edge is kept)."""
         self.conn.execute(
             "MATCH (a:Memory {id: $from_id}), (b:Memory {id: $to_id}) "
-            "CREATE (a)-[:RELATES_TO {weight: $weight, relationship_type: $rtype, created_at: $cat}]->(b)",
+            "MERGE (a)-[r:RELATES_TO]->(b) "
+            "ON CREATE SET r.weight = $weight, r.relationship_type = $rtype, r.created_at = $cat",
             {"from_id": from_id, "to_id": to_id, "weight": weight, "rtype": relationship_type, "cat": created_at},
         )
 
     def add_mentions(self, memory_id: str, entity_id: str, weight: float = 1.0) -> None:
         self.conn.execute(
             "MATCH (m:Memory {id: $mid}), (e:Entity {id: $eid}) "
-            "CREATE (m)-[:MENTIONS {weight: $weight}]->(e)",
+            "MERGE (m)-[r:MENTIONS]->(e) ON CREATE SET r.weight = $weight",
             {"mid": memory_id, "eid": entity_id, "weight": weight},
         )
 
@@ -159,14 +161,18 @@ class GraphStore:
     def get_related_memories(
         self, memory_id: str, max_depth: int = 2, min_weight: float = 0.0,
     ) -> list[dict]:
-        """Traverse RELATES_TO edges up to max_depth hops from a memory node.
+        """Memories within ``max_depth`` RELATES_TO hops of a memory node.
 
-        Returns list of dicts with keys: id, summary, tier, salience, depth, weight.
+        Edges are traversed in both directions (a link from a newer memory to
+        an older one must also lead back). Returns dicts with keys: id, summary,
+        tier, salience, depth (shortest hop count).
         """
+        max_depth = max(1, int(max_depth))
         query = (
-            "MATCH (start:Memory {id: $id})-[r:RELATES_TO*1.." + str(max_depth) + "]->(m:Memory) "
-            "RETURN DISTINCT m.id AS id, m.summary AS summary, m.tier AS tier, "
-            "m.salience AS salience, length(r) AS depth"
+            "MATCH (start:Memory {id: $id})-[r:RELATES_TO*1.." + str(max_depth) + "]-(m:Memory) "
+            "WHERE m.id <> $id "
+            "RETURN m.id AS id, m.summary AS summary, m.tier AS tier, "
+            "m.salience AS salience, min(length(r)) AS depth"
         )
         result = self.conn.execute(query, {"id": memory_id})
         rows = []
@@ -176,7 +182,38 @@ class GraphStore:
                 "id": row[0], "summary": row[1], "tier": row[2],
                 "salience": row[3], "depth": row[4],
             })
+        rows.sort(key=lambda r: (r["depth"], -(r["salience"] or 0.0)))
         return rows
+
+    def get_entity_neighbours(self, memory_id: str, limit: int = 10) -> list[dict]:
+        """Memories that mention an entity this memory mentions (via MENTIONS)."""
+        result = self.conn.execute(
+            "MATCH (m:Memory {id: $id})-[:MENTIONS]->(e:Entity)<-[:MENTIONS]-(o:Memory) "
+            "WHERE o.id <> $id RETURN o.id AS id, count(e) AS shared "
+            "ORDER BY shared DESC LIMIT $limit",
+            {"id": memory_id, "limit": limit},
+        )
+        rows = []
+        while result.has_next():
+            row = result.get_next()
+            rows.append({"id": row[0], "shared": row[1]})
+        return rows
+
+    def delete_memory_node(self, memory_id: str) -> None:
+        """Remove a memory node and all of its edges."""
+        self.conn.execute(
+            "MATCH (m:Memory {id: $id}) DETACH DELETE m", {"id": memory_id},
+        )
+
+    def delete_namespace(self, namespace: str) -> None:
+        """Remove every memory node of a namespace and its namespaced entities."""
+        self.conn.execute(
+            "MATCH (m:Memory) WHERE m.namespace = $ns DETACH DELETE m", {"ns": namespace},
+        )
+        self.conn.execute(
+            "MATCH (e:Entity) WHERE starts_with(e.id, $prefix) DETACH DELETE e",
+            {"prefix": f"{namespace}::"},
+        )
 
     def get_memory_entities(self, memory_id: str) -> list[dict]:
         """Get all entities mentioned by a memory."""
@@ -205,12 +242,23 @@ class GraphStore:
             rows.append({"id": row[0], "summary": row[1], "gen": row[2], "depth": row[3]})
         return rows
 
-    def get_edge_count(self, memory_id: str) -> int:
-        """Count RELATES_TO edges connected to a memory (both directions)."""
-        result = self.conn.execute(
-            "MATCH (m:Memory {id: $id})-[r:RELATES_TO]-() RETURN count(r) AS cnt",
-            {"id": memory_id},
-        )
+    def get_edge_count(self, memory_id: str, exclude_types: tuple[str, ...] = ()) -> int:
+        """Count RELATES_TO edges connected to a memory (both directions).
+
+        ``exclude_types`` drops relationship types from the count (e.g. the
+        write-time "similar" links, which say nothing about structural role).
+        """
+        if exclude_types:
+            result = self.conn.execute(
+                "MATCH (m:Memory {id: $id})-[r:RELATES_TO]-() "
+                "WHERE NOT list_contains($ex, r.relationship_type) RETURN count(r) AS cnt",
+                {"id": memory_id, "ex": list(exclude_types)},
+            )
+        else:
+            result = self.conn.execute(
+                "MATCH (m:Memory {id: $id})-[r:RELATES_TO]-() RETURN count(r) AS cnt",
+                {"id": memory_id},
+            )
         if result.has_next():
             return result.get_next()[0]
         return 0
@@ -255,11 +303,12 @@ class GraphStore:
                         pass
 
     def path_exists(self, from_id: str, to_id: str, max_hops: int = 2) -> bool:
-        """Check if a path exists between two memory nodes via RELATES_TO edges."""
+        """Check if two memory nodes are connected within ``max_hops`` RELATES_TO
+        edges, in either direction."""
         try:
             query = (
-                "MATCH (a:Memory {id: $from_id})-[r:RELATES_TO*1.." + str(max_hops) + "]->(b:Memory {id: $to_id}) "
-                "RETURN count(r) AS cnt LIMIT 1"
+                "MATCH (a:Memory {id: $from_id})-[r:RELATES_TO*1.." + str(max(1, int(max_hops)))
+                + "]-(b:Memory {id: $to_id}) RETURN count(*) AS cnt LIMIT 1"
             )
             result = self.conn.execute(query, {"from_id": from_id, "to_id": to_id})
             if result.has_next():

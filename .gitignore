@@ -18,6 +18,9 @@ data/logs/
 data/memory.db
 data/memory.db-journal
 data/memory.db-wal
+data/memory.db-shm
+data/policy/
+data/policy_data/
 data/graph/
 data/vectors/
 

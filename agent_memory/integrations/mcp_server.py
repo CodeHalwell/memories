@@ -83,17 +83,19 @@ def create_server(service: MemoryService | None = None) -> FastMCP:
         turn: int = 0,
         role: str = "assistant",
         namespace: str = "default",
+        timestamp: str | None = None,
     ) -> dict[str, Any]:
-        """Record a conversation turn as a candidate memory.
+        """Record a conversation turn.
 
-        The system decides whether the turn is worth persisting (salience,
-        emotion, novelty). Returns whether a memory was saved and its details.
-        ``namespace`` isolates data per tenant (e.g. a user or agent id).
+        Every turn is logged and searchable; the decision policy also decides
+        whether to curate it into a memory (keywords, entities, salience).
+        ``namespace`` isolates data per tenant (e.g. a user or agent id);
+        ``timestamp`` (ISO 8601) is when the turn happened.
         """
         await _ensure_ready()
         return await svc.save_turn(
             content=content, session_id=session_id, turn=turn, role=role,
-            namespace=namespace,
+            namespace=namespace, timestamp=timestamp,
         )
 
     @server.tool()
@@ -102,15 +104,38 @@ def create_server(service: MemoryService | None = None) -> FastMCP:
         session_id: str | None = None,
         top_k: int | None = None,
         namespace: str = "default",
+        since: str | None = None,
+        until: str | None = None,
     ) -> dict[str, Any]:
-        """Retrieve memories relevant to a query, ranked by relevance and decay.
+        """Retrieve memories and logged turns relevant to a query.
 
-        Results are isolated to ``namespace``.
+        Results are isolated to ``namespace`` and optionally to events between
+        ``since`` and ``until`` (ISO 8601). Pass the returned ``retrieval_id``
+        to ``memory_feedback`` after answering.
         """
         await _ensure_ready()
         return await svc.retrieve(
             query=query, session_id=session_id, top_k=top_k, namespace=namespace,
+            since=since, until=until,
         )
+
+    @server.tool()
+    async def memory_feedback(retrieval_id: str, response: str) -> dict[str, Any]:
+        """Report the response written using a retrieval's results.
+
+        Items the response drew on are marked used; this is the outcome signal
+        the decision policy learns from.
+        """
+        await _ensure_ready()
+        return await svc.record_response(retrieval_id, response)
+
+    @server.tool()
+    async def memory_delete(
+        memory_id: str, namespace: str = "default", purge_raw: bool = True,
+    ) -> dict[str, Any]:
+        """Delete a memory (and, by default, its source turn from the index)."""
+        await _ensure_ready()
+        return await svc.delete_memory(memory_id, namespace=namespace, purge_raw=purge_raw)
 
     @server.tool()
     async def memory_get(
