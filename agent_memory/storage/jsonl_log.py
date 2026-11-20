@@ -6,6 +6,7 @@ immutable ground truth — entries are never modified or deleted.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -34,15 +35,22 @@ class JSONLLogger:
         safe_id = os.path.basename(session_id) or "_"
         if namespace == "default":
             return self.log_dir / f"{safe_id}.jsonl"
-        safe_ns = re.sub(r"[^A-Za-z0-9._-]", "_", namespace) or "_"
-        ns_dir = self.log_dir / f"ns-{safe_ns}"
+        ns_dir = self.namespace_dir(namespace)
         ns_dir.mkdir(parents=True, exist_ok=True)
         return ns_dir / f"{safe_id}.jsonl"
 
     def namespace_dir(self, namespace: str) -> Path:
+        """Directory for a namespace's logs.
+
+        A readable slug plus a hash of the exact namespace, so namespaces that
+        slug identically ("tenant/a" and "tenant_a") never share a directory —
+        a shared directory would let one tenant's purge delete another's logs.
+        """
         if namespace == "default":
             return self.log_dir
-        return self.log_dir / f"ns-{re.sub(r'[^A-Za-z0-9._-]', '_', namespace) or '_'}"
+        slug = re.sub(r"[^A-Za-z0-9._-]", "_", namespace)[:40] or "_"
+        digest = hashlib.sha256(namespace.encode("utf-8")).hexdigest()[:12]
+        return self.log_dir / f"ns-{slug}-{digest}"
 
     def append(self, entry: RawLogEntry) -> tuple[str, int]:
         """Append an entry and return (file_path, byte_offset)."""

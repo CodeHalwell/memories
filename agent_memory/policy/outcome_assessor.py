@@ -79,13 +79,22 @@ async def assess_save_outcomes(
         queries = await sqlite.get_retrieval_queries(namespace=ns, since=earliest)
         # Bound the cost of a sleep cycle: replay the most recent queries.
         queries = queries[-cfg.get("outcome_replay_max_queries", 2000):]
+        # Rank only turns that existed when the query was made: turns logged
+        # later (including the query's own turn) must not displace the hits it
+        # could actually have had. Over-fetch, drop later turns, then cut.
+        logged_at = {rid: parse_time(ts) for rid, ts in (await sqlite.decision_times(ns)).items()}
+        depth = max(rank_cut * 10, 20)
         for q in queries:
             t = parse_time(q["decided_at"])
             ranked = (
-                await replay(q["query"], ns, rank_cut) if replay is not None
-                else await bm25_replay(sqlite, q["query"], ns, rank_cut)
+                await replay(q["query"], ns, depth) if replay is not None
+                else await bm25_replay(sqlite, q["query"], ns, depth)
             )
-            for rid in ranked[:rank_cut]:
+            available = [
+                rid for rid in ranked
+                if t is None or logged_at.get(rid) is None or logged_at[rid] < t
+            ]
+            for rid in available[:rank_cut]:
                 hit_times[rid].append(t)
         used = await sqlite.get_used_raw_log_ids(ns)
 
@@ -139,10 +148,12 @@ async def assess_retrieval_outcomes(
             if row.get("turn") is not None:
                 followups = await sqlite.get_retrieval_followups(
                     row["session_id"], row["turn"], window=followup_turns,
+                    namespace=row.get("namespace"),
                 )
             else:
                 followups = await sqlite.get_retrieval_followups_by_time(
                     row["session_id"], row["decided_at"], minutes, exclude_id=row["id"],
+                    namespace=row.get("namespace"),
                 )
             original = set(content_terms(row["query"]))
             re_queried = False

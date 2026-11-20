@@ -37,7 +37,7 @@ from agent_memory.models import CompactionResult, Memory, MergeValidation
 from agent_memory.storage.graph_store import GraphStore
 from agent_memory.storage.sqlite_store import SQLiteStore
 from agent_memory.storage.vector_store import VectorStore
-from agent_memory.text import coverage, jaccard, term_set
+from agent_memory.text import coverage, jaccard, negations, term_set, tokens
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,8 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
 
 
 def _normalised(text: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", (text or "").lower())).strip()
+    """Lowercased words in any script, single-spaced (punctuation dropped)."""
+    return " ".join(re.findall(r"[^\W_]+", (text or "").lower()))
 
 
 def _answer_preserved(answer: str, merged_terms: set[str], merged_norm: str) -> bool:
@@ -205,6 +206,18 @@ async def validate_merge(
         answers_checked=len(answers),
         answers_preserved=preserved,
     )
+
+
+def _near_duplicate(a: Memory, b: Memory, threshold: float) -> bool:
+    """Near-identical wording *and* the same polarity.
+
+    Compares all words (stopwords included) so that "I am allergic" and "I am
+    not allergic" are never collapsed, and rejects pairs whose negation words
+    differ outright.
+    """
+    if negations(a.content) != negations(b.content):
+        return False
+    return jaccard(set(tokens(a.content)), set(tokens(b.content))) >= threshold
 
 
 class CompactionEngine:
@@ -299,7 +312,9 @@ class CompactionEngine:
         # buckets for near-duplicates (bounded to keep this roughly linear).
         by_hash: dict[str, list[Memory]] = defaultdict(list)
         for m in mems:
-            by_hash[hashlib.sha1(_normalised(m.content).encode()).hexdigest()].append(m)
+            key = _normalised(m.content)
+            if key:  # an empty key is not evidence of duplication
+                by_hash[hashlib.sha1(key.encode()).hexdigest()].append(m)
         groups = [g for g in by_hash.values() if len(g) > 1]
 
         rare_index: dict[str, list[Memory]] = defaultdict(list)
@@ -315,7 +330,7 @@ class CompactionEngine:
                     continue
                 dupes = [a]
                 for b in bucket[i + 1:]:
-                    if b.id not in grouped and jaccard(terms[a.id], terms[b.id]) >= thr:
+                    if b.id not in grouped and _near_duplicate(a, b, thr):
                         dupes.append(b)
                 if len(dupes) > 1:
                     groups.append(dupes)

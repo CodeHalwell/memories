@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING
 
 from agent_memory.config import DATA_DIR, make_config
 from agent_memory.core.compaction import CompactionEngine
-from agent_memory.core.decay import compute_decay
+from agent_memory.core.decay import compute_decay, parse_time
 from agent_memory.core.dream_explorer import commit_discoveries, exploratory_walk
 from agent_memory.core.keyword_reweight import reweight_keywords_from_graph
 from agent_memory.core.retrieval import RetrievalEngine
@@ -217,7 +217,9 @@ class MemoryManager:
             provider=provider,
         )
         if timestamp:
-            entry.timestamp = timestamp
+            # Normalise to UTC ISO 8601 so time filters compare consistently.
+            parsed = parse_time(timestamp)
+            entry.timestamp = parsed.isoformat() if parsed else timestamp
         file_path, byte_offset = self.jsonl.append(entry)
 
         # 2. Index the raw turn (metadata + full text) so it is retrievable

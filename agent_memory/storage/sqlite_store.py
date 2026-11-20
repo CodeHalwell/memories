@@ -267,7 +267,7 @@ _MEMORY_COLUMNS = (
 
 def entity_key(name: str) -> str:
     """Normalised lookup key for an entity name ("Dr. Jane O'Neil" -> "dr jane o neil")."""
-    return " ".join(re.findall(r"[a-z0-9]+", (name or "").lower()))
+    return " ".join(re.findall(r"[^\W_]+", (name or "").lower()))
 
 
 class SQLiteStore:
@@ -431,21 +431,26 @@ class SQLiteStore:
 
     async def search_raw_fts(
         self, query: str, limit: int = 30, namespace: str | None = None,
+        since: str | None = None, until: str | None = None,
     ) -> list[tuple[str, float]]:
-        """BM25 search over every logged turn. Returns (raw_log_id, score)."""
+        """BM25 search over every logged turn. Returns (raw_log_id, score).
+
+        ``since``/``until`` (normalised ISO timestamps) restrict turns by when
+        they happened, before the LIMIT is applied.
+        """
         match = fts_query(query)
         if not match:
             return []
         if not self.fts_enabled:
             return await self._search_raw_like(query, limit, namespace)
-        ns_clause = "" if namespace is None else "AND r.namespace = ?"
-        params: list[object] = [match, *([] if namespace is None else [namespace]), limit]
+        clauses, params = _scope_clauses("r.namespace", "r.timestamp", namespace, since, until)
         sql = f"""
             SELECT r.id AS id, -bm25(raw_turns_fts) AS score
             FROM raw_turns_fts JOIN raw_log_index r ON r.rowid = raw_turns_fts.rowid
-            WHERE raw_turns_fts MATCH ? AND r.purged = 0 {ns_clause}
+            WHERE raw_turns_fts MATCH ? AND r.purged = 0 {clauses}
             ORDER BY bm25(raw_turns_fts) LIMIT ?
         """
+        params = [match, *params, limit]
         async with self.db.execute(sql, params) as cur:
             return [(row["id"], float(row["score"])) async for row in cur]
 
@@ -806,6 +811,7 @@ class SQLiteStore:
 
     async def search_memories_fts(
         self, query: str, limit: int = 30, namespace: str | None = None,
+        since: str | None = None, until: str | None = None,
     ) -> list[tuple[str, float]]:
         """BM25 search over curated memories (content, summary, keywords,
         entities). Returns (memory_id, score), best first."""
@@ -816,33 +822,39 @@ class SQLiteStore:
             terms = content_terms(query)
             mems = await self.search_by_content(terms, limit=limit, namespace=namespace)
             return [(m.id, 1.0 / (i + 1)) for i, m in enumerate(mems)]
-        ns_clause = "" if namespace is None else "AND m.namespace = ?"
-        params: list[object] = [match, *([] if namespace is None else [namespace]), limit]
+        clauses, params = _scope_clauses(
+            "m.namespace", "COALESCE(m.event_time, m.created_at)", namespace, since, until,
+        )
         sql = f"""
             SELECT m.id AS id, -bm25(memories_fts, 1.0, 0.5, 2.0, 2.0) AS score
             FROM memories_fts JOIN memories m ON m.rowid = memories_fts.rowid
-            WHERE memories_fts MATCH ? {ns_clause}
+            WHERE memories_fts MATCH ? {clauses}
             ORDER BY bm25(memories_fts, 1.0, 0.5, 2.0, 2.0) LIMIT ?
         """
+        params = [match, *params, limit]
         async with self.db.execute(sql, params) as cur:
             return [(row["id"], float(row["score"])) async for row in cur]
 
     async def search_entities(
         self, query: str, limit: int = 30, namespace: str | None = None,
+        since: str | None = None, until: str | None = None,
     ) -> list[tuple[str, float]]:
         """Memories naming an entity mentioned in ``query`` (unigram/bigram match)."""
-        toks = [t for t in re.findall(r"[a-z0-9]+", (query or "").lower())]
+        toks = entity_key(query).split()
         keys = set(toks) | {f"{a} {b}" for a, b in zip(toks, toks[1:])}
-        keys = {k for k in keys if len(k) > 2 and k not in {"the", "and", "you"}}
+        keys = {k for k in keys if (len(k) > 2 or not k.isascii()) and k not in {"the", "and", "you"}}
         if not keys:
             return []
         ph = ",".join("?" for _ in keys)
-        ns_clause = "" if namespace is None else "AND namespace = ?"
-        params = [*keys, *([] if namespace is None else [namespace]), limit]
+        clauses, scope = _scope_clauses(
+            "e.namespace", "COALESCE(m.event_time, m.created_at)", namespace, since, until,
+        )
+        params = [*keys, *scope, limit]
         async with self.db.execute(
-            f"SELECT memory_id, COUNT(*) AS n FROM memory_entities "
-            f"WHERE entity_key IN ({ph}) {ns_clause} "
-            f"GROUP BY memory_id ORDER BY n DESC LIMIT ?",
+            f"SELECT e.memory_id AS memory_id, COUNT(*) AS n FROM memory_entities e "
+            f"JOIN memories m ON m.id = e.memory_id "
+            f"WHERE e.entity_key IN ({ph}) {clauses} "
+            f"GROUP BY e.memory_id ORDER BY n DESC LIMIT ?",
             params,
         ) as cur:
             return [(row["memory_id"], float(row["n"])) async for row in cur]
@@ -1057,6 +1069,13 @@ class SQLiteStore:
         ) as cur:
             return [dict(r) async for r in cur]
 
+    async def decision_times(self, namespace: str) -> dict[str, str]:
+        """raw_log_id -> when its save decision was made (i.e. when it was logged)."""
+        async with self.db.execute(
+            "SELECT raw_log_id, decided_at FROM save_decisions WHERE namespace = ?", (namespace,)
+        ) as cur:
+            return {r["raw_log_id"]: r["decided_at"] async for r in cur}
+
     async def recent_save_rate(self, session_id: str, namespace: str, limit: int = 20) -> float:
         async with self.db.execute(
             "SELECT decision FROM save_decisions WHERE session_id = ? AND namespace = ? "
@@ -1203,27 +1222,34 @@ class SQLiteStore:
         )
         await self.db.commit()
 
-    async def get_retrieval_followups(self, session_id: str, turn: int, window: int = 3) -> list[str]:
+    async def get_retrieval_followups(
+        self, session_id: str, turn: int, window: int = 3, namespace: str | None = None,
+    ) -> list[str]:
         """Get follow-up queries within a turn window (A4 outcome assessment)."""
+        ns_clause = "" if namespace is None else "AND namespace = ?"
         async with self.db.execute(
-            "SELECT query FROM retrieval_decisions WHERE session_id = ? AND turn > ? AND turn <= ?",
-            (session_id, turn, turn + window),
+            "SELECT query FROM retrieval_decisions WHERE session_id = ? AND turn > ? AND turn <= ? "
+            f"{ns_clause}",
+            (session_id, turn, turn + window, *([] if namespace is None else [namespace])),
         ) as cur:
             return [row["query"] async for row in cur]
 
     async def get_retrieval_followups_by_time(
         self, session_id: str, decided_at: str, minutes: int, exclude_id: str,
+        namespace: str | None = None,
     ) -> list[str]:
-        """Follow-up queries in the same session within ``minutes`` after a retrieval."""
+        """Follow-up queries in the same session (and namespace) within
+        ``minutes`` after a retrieval."""
         start = decided_at
         from agent_memory.core.decay import parse_time
 
         t0 = parse_time(decided_at)
         end = (t0 + _minutes(minutes)).isoformat() if t0 else decided_at
+        ns_clause = "" if namespace is None else "AND namespace = ?"
         async with self.db.execute(
             "SELECT query FROM retrieval_decisions WHERE session_id = ? AND id != ? "
-            "AND decided_at > ? AND decided_at <= ?",
-            (session_id, exclude_id, start, end),
+            f"AND decided_at > ? AND decided_at <= ? {ns_clause}",
+            (session_id, exclude_id, start, end, *([] if namespace is None else [namespace])),
         ) as cur:
             return [row["query"] async for row in cur]
 
@@ -1412,6 +1438,23 @@ class SQLiteStore:
         )
         async with self.db.execute(sql, params) as cur:
             return [dict(row) async for row in cur]
+
+
+def _scope_clauses(
+    ns_col: str, time_col: str, namespace: str | None, since: str | None, until: str | None,
+) -> tuple[str, list[object]]:
+    """SQL ``AND`` clauses (and params) for an optional namespace and time window."""
+    clauses, params = [], []
+    if namespace is not None:
+        clauses.append(f"{ns_col} = ?")
+        params.append(namespace)
+    if since is not None:
+        clauses.append(f"{time_col} >= ?")
+        params.append(since)
+    if until is not None:
+        clauses.append(f"{time_col} <= ?")
+        params.append(until)
+    return "".join(f" AND {c}" for c in clauses), params
 
 
 def _minutes(n: int):

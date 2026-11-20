@@ -47,6 +47,7 @@ from agent_memory.text import content_terms
 logger = logging.getLogger(__name__)
 
 _LEXICAL_LAYERS = {"keyword", "raw", "entity", "grep"}
+_MEMORY_LAYERS = {"keyword", "semantic", "entity", "graph", "visual"}
 
 
 @dataclass
@@ -130,6 +131,14 @@ class RetrievalEngine:
         cfg = self.config
         top_k = top_k or cfg["retrieval_top_k"]
         depth = max(cfg["layer_depth"], top_k * 2)
+        # Time windows are applied inside the lexical layers' SQL (before their
+        # LIMIT); vector layers cannot filter on time, so they over-fetch.
+        t_since, t_until = parse_time(since), parse_time(until)
+        window = (
+            t_since.isoformat() if t_since else None,
+            t_until.isoformat() if t_until else None,
+        )
+        vec_depth = depth * 5 if (t_since or t_until) else depth
         active = list(layers if layers is not None else cfg["retrieval_layers"])
 
         # Mood-congruent weighting needs an LLM call per query; skip it when no
@@ -152,19 +161,19 @@ class RetrievalEngine:
             tasks.append((name, asyncio.create_task(coro)))
 
         if "keyword" in active:
-            add("keyword", self._keyword_layer(query, depth, namespace))
+            add("keyword", self._keyword_layer(query, depth, namespace, window))
         if "raw" in active:
-            add("raw", self._raw_layer(query, depth, namespace))
+            add("raw", self._raw_layer(query, depth, namespace, window))
         if "entity" in active:
-            add("entity", self._entity_layer(query, depth, namespace))
+            add("entity", self._entity_layer(query, depth, namespace, window))
         if "grep" in active:
             add("grep", self._grep_layer(query, depth, namespace))
         semantic_scores: list[float] = []
         if query_vector is not None and "semantic" in active:
-            add("semantic", self._semantic_layer(query_vector, depth, namespace, semantic_scores))
+            add("semantic", self._semantic_layer(query_vector, vec_depth, namespace, semantic_scores))
         if (query_vector is not None and "raw_semantic" in active
                 and cfg.get("index_raw_vectors", True)):
-            add("raw_semantic", self._raw_semantic_layer(query_vector, depth, namespace, semantic_scores))
+            add("raw_semantic", self._raw_semantic_layer(query_vector, vec_depth, namespace, semantic_scores))
         if enable_visual and self.visual_embedder:
             add("visual", self._visual_layer(query, depth, namespace))
 
@@ -178,7 +187,13 @@ class RetrievalEngine:
 
         # Raw hits on curated turns count for the memory itself.
         raw_ids = {key[1] for items in layer_lists.values() for key, _ in items if key[0] == "r"}
-        raw_to_mem = await self.sqlite.memory_ids_for_raw(sorted(raw_ids), namespace=namespace)
+        # With only raw layers active (outcome replay, raw-history baselines),
+        # keep raw turns as raw candidates so ranking does not depend on which
+        # turns were curated or later consolidated.
+        raw_to_mem = (
+            await self.sqlite.memory_ids_for_raw(sorted(raw_ids), namespace=namespace)
+            if set(active) & _MEMORY_LAYERS else {}
+        )
 
         def canonical(key: tuple[str, str]) -> tuple[str, str]:
             if key[0] == "r" and key[1] in raw_to_mem:
@@ -390,16 +405,22 @@ class RetrievalEngine:
     # ── Layer implementations ──
     # Each returns [((kind, id), score), ...] best first; kind is "m" (memory) or "r" (raw).
 
-    async def _keyword_layer(self, query: str, limit: int, namespace: str = "default"):
-        hits = await self.sqlite.search_memories_fts(query, limit=limit, namespace=namespace)
+    async def _keyword_layer(self, query: str, limit: int, namespace: str = "default", window=(None, None)):
+        hits = await self.sqlite.search_memories_fts(
+            query, limit=limit, namespace=namespace, since=window[0], until=window[1],
+        )
         return [(("m", mid), s) for mid, s in hits]
 
-    async def _raw_layer(self, query: str, limit: int, namespace: str = "default"):
-        hits = await self.sqlite.search_raw_fts(query, limit=limit, namespace=namespace)
+    async def _raw_layer(self, query: str, limit: int, namespace: str = "default", window=(None, None)):
+        hits = await self.sqlite.search_raw_fts(
+            query, limit=limit, namespace=namespace, since=window[0], until=window[1],
+        )
         return [(("r", rid), s) for rid, s in hits]
 
-    async def _entity_layer(self, query: str, limit: int, namespace: str = "default"):
-        hits = await self.sqlite.search_entities(query, limit=limit, namespace=namespace)
+    async def _entity_layer(self, query: str, limit: int, namespace: str = "default", window=(None, None)):
+        hits = await self.sqlite.search_entities(
+            query, limit=limit, namespace=namespace, since=window[0], until=window[1],
+        )
         return [(("m", mid), s) for mid, s in hits]
 
     async def _semantic_layer(self, query_vector, limit: int, namespace: str, scores_out: list):

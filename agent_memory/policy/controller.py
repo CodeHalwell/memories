@@ -144,7 +144,10 @@ class PolicyController:
         model: DecisionModel
         if self.learned is not None:
             model = self.learned
-            threshold = self._bounded_threshold(self.learned.threshold, features)
+            # Save-rate bounds are enforced when the threshold is chosen in
+            # training, so the threshold evaluated by the promotion gate is the
+            # threshold used here.
+            threshold = self.learned.threshold
         elif features.get("llm_available"):
             model = self.llm_model
             threshold = cfg["save_confidence_threshold"] if llm_threshold is None else llm_threshold
@@ -159,15 +162,6 @@ class PolicyController:
             threshold=round(threshold, 4), source=model.name,
             reason=f"{model.name}: p={prob:.2f} {'>=' if save else '<'} {threshold:.2f}",
         )
-
-    def _bounded_threshold(self, threshold: float, features: dict[str, float]) -> float:
-        """Nudge a learned model's threshold to respect the save-rate bounds."""
-        rate = features.get("recent_save_rate", 0.0)
-        if rate > self.constraints["max_save_rate"]:
-            return min(threshold + 0.1, 0.95)
-        if 0.0 < rate < self.constraints["min_save_rate"]:
-            return max(threshold - 0.1, 0.05)
-        return threshold
 
     # ── Legacy / heuristic interfaces ──
 

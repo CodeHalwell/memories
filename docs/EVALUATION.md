@@ -147,6 +147,10 @@ The lexical prior curated 71% of turns in every configuration.
 - `seconds` in the JSON output are not comparable across systems: some runs
   shared the CPU with the decision-model experiment.
 - Small local models throughout (MiniLM embedder and cross-encoder, CPU).
+- Measured at commit `5168f2b`. Review fixes merged afterwards keep raw-only
+  configurations free of curation effects and make tokenisation Unicode-aware;
+  `raw_bm25` re-measured afterwards gives 0.299 / 0.522 / 0.604 / 0.668
+  (recall@1 +0.001, the rest unchanged). The other systems were not re-run.
 
 The decision-model experiment is reported in
 [DECISION_MODEL.md](DECISION_MODEL.md#6-evidence-locomo-10-conversations-5882-turns).

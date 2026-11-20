@@ -66,7 +66,9 @@ sees in deployment:
   against the raw-turn layers only (so curated and skipped turns are treated
   identically), through the manager's retrieval engine — reranked when a
   reranker is configured. A turn that ranks within `outcome_useful_rank` for a
-  query made *after* its decision is labelled useful.
+  query made *after* its decision is labelled useful. Only turns that existed
+  when the query was made are ranked, so later turns (including the query's
+  own) cannot displace the hits it could actually have had.
 - **Usage attribution.** When the agent's reply is recorded
   (`record_response`, called automatically by `ChatConnector`, exposed as MCP
   `memory_feedback` and REST `POST /feedback`), retrieved items whose content

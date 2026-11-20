@@ -9,7 +9,9 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-_TOKEN_RE = re.compile(r"[A-Za-z0-9]+(?:'[A-Za-z]+)?")
+# Unicode-aware: letters/digits in any script (FTS5's unicode61 tokenizer
+# indexes them too), with an optional apostrophe suffix ("ben's").
+_TOKEN_RE = re.compile(r"[^\W_]+(?:'[^\W_]+)?")
 
 STOPWORDS = frozenset("""
 a about above after again against all am an and any are aren't as at be because been
@@ -38,7 +40,8 @@ def content_terms(text: str, min_len: int = 3) -> list[str]:
     """Tokens with stopwords and very short tokens removed, in order."""
     return [
         t for t in tokens(text)
-        if t not in STOPWORDS and (len(t) >= min_len or t.isdigit())
+        # Non-Latin words (e.g. CJK) are often one or two characters long.
+        if t not in STOPWORDS and (len(t) >= min_len or t.isdigit() or not t.isascii())
     ]
 
 
@@ -70,7 +73,7 @@ def fts_query(text: str, max_terms: int = 24) -> str | None:
         # Split on apostrophes: "ben's" would otherwise become the FTS phrase
         # "ben s", which never matches "Ben" (possessives are common in questions).
         for t in term.replace('"', "").split("'"):
-            if len(t) >= 2 and t not in STOPWORDS and t not in seen:
+            if (len(t) >= 2 or not t.isascii()) and t not in STOPWORDS and t not in seen:
                 seen.append(t)
         if len(seen) >= max_terms:
             break
@@ -122,6 +125,17 @@ _ACK_RE = re.compile(
     r"bye|goodbye|lol|haha|wow|awesome|sounds good|got it)\b[\s!.?,]*",
     re.IGNORECASE,
 )
+
+
+NEGATIONS = frozenset("""
+not no never nor none nobody nothing nowhere neither without cannot can't don't doesn't
+didn't isn't aren't wasn't weren't won't wouldn't shouldn't couldn't hasn't haven't hadn't
+""".split())
+
+
+def negations(text: str) -> set[str]:
+    """Polarity-bearing words in ``text`` (stopword filtering would drop them)."""
+    return {t for t in tokens(text) if t in NEGATIONS}
 
 
 def has_number(text: str) -> bool:
